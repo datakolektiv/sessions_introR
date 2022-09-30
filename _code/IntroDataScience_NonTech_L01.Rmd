@@ -1,0 +1,363 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Lab01
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Lab 01: Regular expressions
+ 
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### What do we want to do today?
+
+We will learn more about regular expressions and string processing in R. Please take into your consideration that regular expressions are indeed complicated and in that fact it takes a course on its own in order to master them completely. Here we will cover only some elementary applications of regular expressions that are useful in simple data cleaning operations.
+
+### 1. Regular expressions
+
+**Please** consider this piece of documentation seriously: [regex](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/regex) 
+
+#### 1.1 Introduction: `grepl()`, `grep()`, and `regexpr()`
+
+Let's begin by reviewing what we have already learned: `grepl()`
+
+```{r echo = T}
+strings <- c("hyperplane", "airplane", "filter", "dplyr", "plane")
+grepl(pattern = "plane", x = strings)
+```
+The base R function `grepl()` asks us to define a `pattern` - which is a regex - and then to provide a value for the `x` argument which is a *string* (or a vector of strings, as in this example) in which we want to look for the `pattern`. Our first example is very simple: we ask if `"plane"` is present in `"hyperplane"`, `"airplane"`, `"filter"`, `"dplyr"`, or `"plane"`, and the result is of course: `TRUE`, `TRUE`, `FALSE`, `FALSE`, ` TRUE`.
+
+What about the following:
+
+```{r echo = T}
+strings <- c("hyperplane", "airplane", "filter", "dplyr", "plane")
+grepl(pattern = "Plane", x = strings)
+```
+Well, of course: `"Plane"` is simply not the same as `"plane"`. Now, `grepl()` has another argument that we did not use before, `ignore.case`. It is a logical one:
+
+```{r echo = T}
+strings <- c("hyperplane", "airplane", "filter", "dplyr", "plane")
+grepl(pattern = "Plane", x = strings, ignore.case = TRUE)
+```
+
+Enter regular expressions: remember that `^` represents the beginning of the string?
+
+```{r echo = T}
+strings <- c("hyperplane", "airplane", "filter", "dplyr", "plane")
+grepl(pattern = "^plane", x = strings, ignore.case = TRUE)
+```
+and of course only `"plane"` in `strings` begins with `"plane"`. 
+
+What elements of the `strings` character vector end with `plane`? We have already seen in this course that as `^` represents the empty character at the beginning of the string there is `$` that represents the empty character at the *end of the string*:
+
+```{r echo = T}
+strings <- c("hyperplane", "airplane", "filter", "dplyr", "plane")
+grepl(pattern = "plane$", x = strings, ignore.case = TRUE)
+```
+Besides `grepl()` we also have `grep()` in base R:
+
+```{r echo = T}
+strings <- c("hyperplane", "airplane", "filter", "dplyr", "plane")
+grep(pattern = "plane", x = strings)
+```
+Unlike `grepl()` that returns a logical vector, `grep()` returns the indices of `x` where the pattern is found. For example:
+
+```{r echo = T}
+strings <- c("hyperplane", "airplane", "filter", "dplyr", "plane")
+grep(pattern = "^plane", x = strings)
+```
+Or:
+
+```{r echo = T}
+strings <- c("hyperplane", "airplane", "filter", "dplyr", "plane")
+grep(pattern = "plane$", x = strings)
+```
+But we can also ask for the values from `grep()`:
+
+```{r echo = T}
+strings <- c("hyperplane", "airplane", "filter", "dplyr", "plane")
+grep(pattern = "plane$", x = strings, value = T)
+```
+Another important base R function to work with regular expressions is `regexpr()`.
+
+```{r echo = T}
+strings <- c("hyperplane", "airplane", "filter", "dplyr", "plane")
+regexpr(pattern = "plane", text = strings)
+```
+Please disregard the `useBytes` and `index.type` attributes for now. What is interesting here is the function output and the  `match.length` attribute. The value that the function returns is the position where `pattern` begins in each element of `text` in which the `pattern` is actually found, with `-1` indicating that the pattern was not found indeed:
+
+```{r echo = T}
+strings <- c("hyperplane", "airplane", "filter", "dplyr", "plane")
+foundWhere <- regexpr(pattern = "plane", text = strings)
+foundWhere[1]
+```
+This means that the `pattern` was found to begin in the 6h position of the first element of `text`, which is: "hyperplane". What was the length of the pattern found?
+
+```{r echo = T}
+strings <- c("hyperplane", "airplane", "filter", "dplyr", "plane")
+foundWhere <- regexpr(pattern = "plane", text = strings)
+attr(foundWhere, 'match.length')[1]
+```
+Now this you have not seen before. R objects have *attributes*, and the attributes are accessed via the `attr()` function. In this case, `attr(foundWhere, 'match.length')[1]` asks for the first value of the `match.length` attribute of the `foundWhere` object.
+
+This is how we find where patterns begin and end in strings in base R, look:
+
+```{r echo = T}
+strings <- c("hyperplane", "airplane", "filter", "dplyr", "plane")
+foundWhere <- regexpr(pattern = "plane", text = strings)
+start <- foundWhere[1]
+end <- attr(foundWhere, 'match.length')[1]
+cat(
+  paste0('"plane" is found in "',
+         strings[1],
+         '" beginning in the ',
+         start, 'th position and ending in the ',
+         start+end-1, 'th position'))
+```
+and it follows that the value of `'match.length'` attribute corresponds to the value of the `pattern` that we were looking for!
+
+**Hint:** study what `gregexpr()` does in base R + learn about the difference between `print()` and `cat()` in R.
+
+#### 1.2 Regex, seriously
+
+We understand the meaning of `^` and `$` in regex already. Now we want to learn about the meaning of `+`, `*`, `.`, `[`, `]`, and `|`.
+
+Imagine that we are facing the task to analyze some aspect of a system that encompasses user names of the following form:
+
+```{r echo = T}
+userID <-  "Maria0001449"
+grepl("0001449", userID)
+```
+Of course. However, what if the system imposes the following rule: a user name must begin with the user's real name, followed by *any* number of digits?
+
+See:
+
+```{r echo = T}
+userID <-  "Maria0001449"
+grepl("[0123456789]+$", userID)
+```
+What we find in between `[` and `]` is a character class: it matches *any* character found in it. What `+` means is: the previous character - or a character class, in our example - is found *once or more than once*. So, the semantics of `[0123456789]+$` is exactly the following one:
+
+- *any* of `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9` is found,
+- and it is repeated (hint: `+`) once or more than once, and then 
+- the string ends (hint: `$`).
+
+What if the system has the following rule for user names: a user name must begin with the user's real name, followed *or not* by *any* number of digits?
+
+```{r echo = T}
+userID <-  "Maria0001449"
+grepl("[0123456789]*$", userID)
+```
+Ok, but also:
+
+
+```{r echo = T}
+userID <-  "Maria"
+grepl("[0123456789]*$", userID)
+```
+Because in regular expressions `*` means: the previous repeats **zero** or as many times!
+
+So, `+` and `*` are *quantifiers` in regular expressions. Again, character classes:
+
+
+```{r echo = T}
+string <-  "ABCDE"
+grepl("[Y|I|O]", string)
+```
+What is `|`? Let' see:
+
+```{r echo = T}
+string <-  "ABCDE"
+grepl("[Y|A|O]", string)
+```
+```{r echo = T}
+string <-  "ABCDE"
+grepl("[Y|9|O]", string)
+```
+```{r echo = T}
+string <-  "ABCDE"
+grepl("[D|E|0]", string)
+```
+So `|` means: **logical OR** :)
+
+The following one: `.` is dangerous. The `.` means: **just anything**:
+
+```{r echo = T}
+string <-  "ABCDE"
+grepl(".", string)
+```
+And it is, of course, found everywhere:
+
+```{r echo = T}
+string <-  "ABCDE"
+gregexpr(".", string)
+```
+So what if we need to recognize `.` literally in a string? Well, we have to escape it:
+
+```{r echo = T}
+string <-  "Goran.S.Milovanovic"
+gregexpr("\.", string)
+```
+No, no... This is what we need:
+
+```{r echo = T}
+string <-  "Goran.S.Milovanovic"
+gregexpr("\\.", string)
+```
+And yes `.` is found in the sixth and eighth position in `Goran.S.Milovanovic`!
+
+Why the double backslash: `\\`? Because the backslash escapes in R, but in regex also, of course, so we need to inform R that what follows the first `\` needs to be interpreted not as some special character but literally as what it is, and then the second `\` informs the regex engine that what follows it - and that would be `.` - should be escaped, i.e. not interpreted as `anything` (regex semantics) but as the `.` character literally. 
+
+Complicated? You will get used to it, do not worry... Remember that Data Science is the sexiest profession of the 21st century. Well is it not? :)
+
+Look:
+
+```{r echo = T}
+string <-  "Goran.S.Milovanovic0528$@3674"
+grepl("[[:alpha:]]+\\.[[:alpha:]]\\.[[:alpha:]]+.+", string)
+```
+`[[:alpha:]]+\\.[[:alpha:]]\\.[[:alpha:]]+.+` means: 
+
+- a letter (`[[:alpha:]]`),
+- occurring once or more than once (`+`), is followed by 
+- a dot (`\\.`), followed by 
+- a single letter (`[[:alpha:]]`), followed by
+- a dot (`\\.`), followed by 
+- a letter (`[[:alpha:]]`),
+- occurring once or more than once (`+`), followed by
+- just anything repeated once or more than once (`.+`).
+
+What is `[[:alpha:]]`?
+
+#### 1.3 Predefined character classes
+
+From the [Regex: Regular Expressions As Used In R documentation page](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/regex): 
+
+> Certain named classes of characters are predefined.
+
+``` {}
+[:alnum:]
+Alphanumeric characters: [:alpha:] and [:digit:].
+
+[:alpha:]
+Alphabetic characters: [:lower:] and [:upper:].
+
+[:blank:]
+Blank characters: space and tab, and possibly other locale-dependent characters such as non-breaking space.
+
+[:cntrl:]
+Control characters. In ASCII, these characters have octal codes 000 through 037, and 177 (DEL). In another character set, these are the equivalent characters, if any.
+
+[:digit:]
+Digits: 0 1 2 3 4 5 6 7 8 9.
+
+[:graph:]
+Graphical characters: [:alnum:] and [:punct:].
+
+[:lower:]
+Lower-case letters in the current locale.
+
+[:print:]
+Printable characters: [:alnum:], [:punct:] and space.
+
+[:punct:]
+Punctuation characters: ! " # $ % & ' ( ) * + , - . / : ; < = > ? @ [ \ ] ^ _ ` { | } ~.
+
+[:space:]
+Space characters: tab, newline, vertical tab, form feed, carriage return, space and possibly other locale-dependent characters.
+
+[:upper:]
+Upper-case letters in the current locale.
+
+[:xdigit:]
+Hexadecimal digits: 0 1 2 3 4 5 6 7 8 9 A B C D E F a b c d e f.
+```
+
+**Q.** Ok, but why the double square brackets, like in: `[[:alpha:]]`?
+
+**A.** Because `[` and `]` in `[:alpha:]` are simply a part of the predefined name, and we still want to inform the regex engine that we mean: *a character class*.
+
+#### 1.4 Backreferences and `gsub()`
+
+Did we mention `gsub()` in the past? I think we already did:
+
+```{r echo = T}
+string <-  "New York City"
+gsub("New", "Old", string)
+```
+Ok. Now what if I would like to change *each* occurrence of `#err` to an empty string `""` in the following: 
+
+```{r echo = T}
+string <-  "someDatabas#erreRecordGoneWrong"
+gsub("#err", "", string)
+```
+Great. Now we know how to delete things that we do not need in strings. 
+
+Now, the *backreferences* in regex with `gsub()`. Imagine that we are facing the following situation: 
+
+```{r echo = T}
+strings <- c("NewYork", "NewAmsterdam", "NewBelgrade")
+print(strings)
+```
+Obviously, a set of typos, all missing a white space, which can be fixed in the following way:
+
+```{r echo = T}
+gsub("(New)", "\\1 ", strings)
+```
+`\\1` in this example is a **backreference** which refers to the *first* parenthesized expression in the pattern `"(New)"`; it will be replaced by itself concatenated with a white space - `"\\1 "` in `gsub()`! Let's elaborate; in
+
+```
+gsub(pattern, replacement, x)
+```
+
+we have used `"(New)"` as a `pattern`, and `"\\1 "` as a `replacement`, where `strings` played a role of `x`: the `replacement` used `\\1` as a backreference to `(New)` in the `pattern` argument `"(New)"`.
+
+
+
+
+### Further Readings
+
+- Once again: [Gaston Sanchez's "Handling and Processing Strings in R"](http://gastonsanchez.com/Handling_and_Processing_Strings_in_R.pdf) - the chances you will ever need more than what's covered in this text-book are slim.
+
+- **Regular Expressions**: go pro. [Regular-Expressions.info](http://www.regular-expressions.info/) is a well known learning resource. In order to figure out the specific regex standard used in R: [Regular Expressions as used in R](https://stat.ethz.ch/R-manual/R-devel/library/base/html/regex.html). [This section of Regular-Expressions.info](http://www.regular-expressions.info/rlanguage.html) is on regex in R specifically.
+
+
+### R Markdown
+
+[R Markdown](https://rmarkdown.rstudio.com/) is what I have used to produce this beautiful Notebook. We will learn more about it near the end of the course, but if you already feel ready to dive deep, here's a book: [R Markdown: The Definitive Guide, Yihui Xie, J. J. Allaire, Garrett Grolemunds.](https://bookdown.org/yihui/rmarkdown/) 
+
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+

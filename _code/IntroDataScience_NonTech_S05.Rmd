@@ -1,0 +1,763 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Session05A
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Session 05: Vector and matrix arithmetic. Strings and text: {stringr}
+ 
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### What do we want to do today?
+
+We have learned a lot about vectors and matrices in R already. However, following the first four (intensive) sessions on R programming, covering everything from vectors and lists (that are also vectors in R) to iterations, decisions, and functions ... that knowledge might be scattered a bit. Now we want to consolidate our knowledge on vectors and then introduce multidimensional arrays and some basic linear algebra. After all, understanding how *vectors* operate in a *vectorized programming language* is pretty much part of being in command...
+Following our overview of vectors, matrices, and arrays, we proceed to a super-important topic of strings and text processing in R. We introduce the [{stringr}](https://stringr.tidyverse.org/) package and discuss the basics of [Regular expressions (regex)](https://stat.ethz.ch/R-manual/R-devel/library/base/html/regex.html). While Regular expression are a topic that deserves a course on their own, the basics are definitely an essential part of any Data Science and Analytics role.
+
+
+
+### 0. Prerequisits.
+
+Install the following packages:
+
+```{r echo = T, eval = F, message = F}
+install.packages('stringr')
+```
+
+**Note.** By now, many of you have probably already installed [{tidyverse}](https://www.tidyverse.org/). If that is the case, `library(tidyverse)` would do just fine - {stringr} is there.
+
+### 1. Vectors and matrices
+
+#### 1.1 Subsetting and recycling
+
+A reminder. First of all: vectoriziation is always turned on, that is simply the nature of R...
+
+```{r echo = T}
+a <- c(7, 1, 3, 9, 15)
+b <- 5
+a + b
+```
+... but recycling is also always on: the result that we have observed is a consequence of the fact that `b`, a numeric vector of length one, was recycled as many times as was necessary to meet the length of `a` which is five. See:
+
+```{r echo = T}
+a <- 1:10
+b <- c(2, 3)
+a ^ b
+```
+Square, then cube, then square, then cube... and so on. Because we are recycling `b <- c(2, 3)`.
+
+The same for matrices:
+
+```{r echo = T}
+a <- matrix(1:9, 
+            ncol = 3)
+print(a)
+```
+Now
+
+```{r echo = T}
+a^2
+```
+But
+
+```{r echo = T}
+a^c(2, 3)
+```
+Again: how does R order the indices of a matrix? Mind the warning, by the way.
+
+**The recycling rule:**
+
+> If two vectors are of unequal length, the shorter one will be recycled in order to match the longer vector.
+
+Now, as of subsetting vectors and matrices.
+
+```{r echo = T}
+a <- seq(2, 100, 2)
+print(a)
+```
+We can subset by indices:
+
+```{r echo = T}
+a[1:20]
+```
+But we can also create a mask and subset by it:
+
+```{r echo = T}
+a <- seq(2, 100, 2)
+print(a)
+```
+
+```{r echo = T}
+mask <- rep(c(T, F), times = length(a)/2)
+print(mask)
+```
+```{r echo = T}
+length(a) == length(mask)
+```
+```{r echo = T}
+a_mask <- a[mask]
+print(a_mask)
+```
+```{r echo = T}
+length(a_mask)
+```
+**Reminder.** Unidimensional vectors do not have a dimension in R:
+
+```{r echo = T}
+print(a)
+```
+
+```{r echo = T}
+dim(a)
+```
+They only have a length:
+
+```{r echo = T}
+length(a)
+```
+Unlike matrices or dataframes:
+
+```{r echo = T}
+a <- matrix(1:9, 
+            ncol = 3)
+dim(a)
+```
+Did you ever think about using negative indices?
+
+```{r echo = T}
+a <- 1:10
+a[-2]
+```
+So, negative indices delete elements from a vector, as well as `FALSE` deletes them when used in a mask! See:
+
+```{r echo = T}
+a <- matrix(1:9, 
+            nrow = 3)
+print(a)
+```
+Now:
+
+```{r echo = T}
+a[-2, -2]
+```
+
+What has just happened? Well... `[-2, -2]` means: remove the 2nd row and the 2nd column. There are interesting combinations to remember, such as...
+
+```{r echo = T}
+a[-2, ]
+```
+
+... which reads: remove the second row, but keep all columns. Remember how we used to subset dataframes? Or:
+
+```{r echo = T}
+a[-2, 3]
+```
+^^ removed the 2nd row, and then kept everything from the 3rd column of `a`. Mind the classes, it is not a `matrix` anymore...
+
+```{r echo = T}
+class(a[-2, 3])
+```
+... so `dim(a[-2, 3])` is, of course:
+
+```{r echo = T}
+dim(a[-2, 3])
+```
+
+#### 1.2 Basic Linear Algebra
+
+Let's begin by creating two vectors, `arr1` and `arr2`:
+
+```{r echo = T}
+arr1 <- seq(2,20,2)
+arr2 <- seq(1,19,2)
+print("arr1: ")
+print(arr1)
+print("arr2: ")
+print(arr2)
+```
+Vectorized, element-wise multiplication:
+
+```{r echo = T}
+arr1 * arr2
+```
+Now, introduce the scalar product ("dot product", or "inner product": the sum of the products of the corresponding entries of the two sequences of numbers) in R with `%*%`:
+
+```{r echo = T}
+arr1 %*% arr2
+```
+which is, of course, the same as:
+
+```{r echo = T}
+sum(arr1 * arr2)
+```
+Now we introduce the transpose, `t()`. It is more intuitive to begin with a matrix:
+
+```{r echo = T}
+mat <- matrix(1:9, 
+              ncol = 3)
+print(mat)
+```
+And `t(mat)` is:
+
+```{r echo = T}
+t(mat)
+```
+It is easy to understand: the rows become columns, and the columns become rows. But what happens if we transpose a unidimensional array of numbers?
+
+```{r echo = T}
+print(arr1)
+```
+```{r echo = T}
+t(arr1)
+```
+No difference? Not really. R defaults to column vectors; only the second example (i.e. `t(arr1)`) is a row vector.
+
+Dot product, again:
+
+```{r echo = T}
+# - arr1 will become a row vector after t();
+# - arr2 will remain a column vector:
+t(arr1) %*% arr2
+```
+But:
+
+```{r echo = T}
+# - arr1 will be a column vector;
+# - arr2 will become a row vector after t():
+arr1 %*% t(arr2)
+```
+A faster way to obtain a dot product of two vectors is to use `crossprod()`:
+
+```{r echo = T}
+crossprod(arr1,arr2)
+```
+But the class of `crossprod(arr1,arr2)` will be:
+
+```{r echo = T}
+class(crossprod(arr1,arr2))
+```
+`drop()` can be used to strip the `matrix` and `array` classes and obtain a scalar value as a result:
+
+```{r echo = T}
+# as scalar:
+drop(crossprod(arr1, arr2))
+```
+
+Also, a more efficient way to obtain `arr1 %*% t(arr2)` is to use `tcrossproduct()`:
+
+```{r echo = T}
+tcrossprod(arr1, arr2)
+```
+in place of the already seen, but slower:
+
+```{r echo = T}
+arr1 %*% t(arr2)
+```
+
+> Note. From the [`crossprod()` documentation](https://stat.ethz.ch/R-manual/R-patched/library/base/html/crossprod.html): Vectors are promoted to single-column or single-row matrices, depending on the context.
+
+Basic matric algebra:
+
+```{r echo = T}
+mat1 <- matrix(1:9, 
+               nrow = 3)
+mat1
+```
+
+```{r echo = T}
+mat2 <- matrix(seq(2, 18, 2), 
+               nrow = 3)
+mat2
+```
+Matrix multiplication vectorized is, again, element-wise in R:
+
+```{r echo = T}
+mat1 * mat2
+```
+Real algebraic matrix multiplication is obtained by `%*%`:
+
+```{r echo = T}
+mat1 %*% mat2
+```
+And then, what is often used in statistics, `X'X`, is of course:
+
+```{r echo = T}
+crossprod(mat1, mat2)
+```
+
+which is the same as (less efficient):
+
+```{r echo = T}
+t(mat1) %*% mat2
+```
+
+
+While `XX'` is:
+
+```{r echo = T}
+tcrossprod(mat1, mat2)
+```
+the same as (less efficient):
+
+```{r echo = T}
+mat1 %*% t(mat2)
+```
+
+#### 1.3 Multidimensional Arrays
+
+Multdimensional arrays in R are created by `array()`
+
+```{r echo = T}
+input <- c(5, 9, 3, 10, 11, 12, 13, 14, 15) 
+length(input)
+```
+```{r echo = T}
+arr1 <- array(vector1, 
+              dim = c(3, 3, 2)) 
+print(arr1) 
+```
+
+```{r echo = T}
+arr1[, , 1]
+```
+```{r echo = T}
+arr1[, , 2]
+```
+Let's check something:
+
+```{r echo = T}
+prod(c(3, 3, 2)) == length(input)
+```
+So `arr1` was produced by recycling - that is why `arr1[ , , 1]` and `arr[ , , 3]` are `identical()`:
+
+```{r echo = T}
+identical(arr1[ , , 1], arr1[ , , 2])
+```
+Everything else works as expected:
+
+```{r echo = T}
+apply(arr1, 1, sum)
+```
+
+```{r echo = T}
+apply(arr1, 2, sum)
+```
+
+```{r echo = T}
+apply(arr1, 3, sum)
+```
+
+### 2 Strings and regex
+
+We will now provide a very short and concise overview of some of the R's functionality for string processing. The later is found among the most interesting and difficult topics in computer science. On the other hand, the work of a contemporary Data Scientist - a practitioner who needs to invest time and resources to get its data sets cleaned and properly formatted for mathematical modeling - is heavily loaded with text and string processing steps. Many data sources that are available out there provide only unstructured, or semi-structured data, and that's were the skills of string handling, text processing, and, finally, data wrangling (next session) come into play. The caveat here is that string processing is a *huge* domain in itself, and that is why we can provide an overview and an introduction here. It's one of those things were a disciple becomes an expert by necessity, and were progress really means *practice*. 
+
+To go beyond this session: [Gaston Sanchez's "Handling and Processing Strings in R"](http://gastonsanchez.com/Handling_and_Processing_Strings_in_R.pdf) is probably the best that is out there.
+
+``` {r echo=T}
+library(stringr)
+```
+
+On {stringr}, from [Introduction to stringr, 2016-08-19](https://cran.r-project.org/web/packages/stringr/vignettes/stringr.html): "*Simplifies string operations by eliminating options that you don’t need 95% of the time (the other 5% of the time you can functions from base R or stringi)*" - and it reallly does. Now,
+
+Kick it! Strings in R are character vectors:
+
+``` {r echo=T}
+string_1 <- "Hello world"
+string_2 <- "Sun shines!"
+```
+
+``` {r echo=T}
+string_1
+```
+
+``` {r echo=T}
+string_2
+```
+
+``` {r echo=T}
+is.character(string_1) # TRUE
+```
+``` {r echo=T}
+as.character(200*5)
+```
+
+``` {r echo=T}
+as.numeric("1000")
+```
+
+``` {r echo=T}
+as.double("3.14")
+```
+
+Remember the `character` data type? Strings in R are nothing but instantiations of this data type. A `character` is a very "old" data type in R, so that all integers and doubled coerce to characters when appropriate. For example,
+
+``` {r echo = T}
+number <- 10
+paste("Text", number)
+```
+
+We will discuss `paste()` later, but you can see from the example that is "puts things together into a character vector" (it *concatenates* strings, technically). However, the numeric `10` is lost in a new string, isn't it... in R coercion, `character` eats everything.
+
+One needs to be careful when it comes to quoting string constants here (i.e. minding the occasion when the usage of `'` and `"` is appropriate):
+
+``` {r echo=T}
+# Using " and '
+# either:
+string_1 <- "Hello 'World'"
+string_1
+```
+
+``` {r echo=T}
+# or
+string_1 <- 'Hello "World"'
+string_1 # prints: "Hello \"World\"" - what is this: \ ?
+```
+
+What is this: `\`?!! It was not in my string? Don't worry, `\` is R's escape character. In the character vector above - `'Hello "World"'` - we find two instantiations of `"` enclosed by `'`. On the output, R transferred all instantiations of `'` to `"`, making it four instantiations of `"` altogether now. The escape character `\` is used to signal that the **second** instantiation of `"` is not a beginning of a new string, but a token to be printed, and that the third instantiation of `"` is not an ending of a string, but also a token to be printed to the output device.
+
+If you care about this much, take a look at the difference between `writeLines()` and `print()`:
+
+``` {r echo=T}
+# try:
+writeLines(string_1)
+print(string_1)
+```
+
+You could also start experimenting with `cat()`. More on escapism in R:
+
+``` {r echo=T}
+# Escaping in R: use \, the R escape character
+string_1 <- 'Hello \"World\"'
+string_1
+```
+``` {r echo=T}
+writeLines(string_1)
+```
+
+Escaping the escape character:
+
+``` {r echo=T}
+writeLines("\\") # nice
+```
+
+Yes that's how you get to use the escape character as a printable character in R, if you were wondering. Wait until it comes to regular expressions where things in R really tend to get nasty.
+
+***
+
+#### 2.1 Elementary Functions on Strings in R
+
+To obtain a length of a string in R...
+
+``` {r echo=T}
+# Length of strings
+length(string_1) # of course
+```
+
+But of course it is. Maybe `nchar()` would do better:
+
+``` {r echo=T}
+nchar(string_1) # base function
+```
+
+Concatenating strings in R:
+
+``` {r echo=T}
+string_3 <- c(string_1, string_2) # a character vector of length == 2
+writeLines(string_3)
+```
+
+No. No, no, no... that's a character vector of length == 2, we need to use `paste()` here:
+
+``` {r echo=T}
+string_3 <- paste(string_1, string_2, sep = ", ") # length == 1, base function
+writeLines(string_3)
+```
+
+Where {base} has `paste()`, {stringr} has `str_c()`:
+
+``` {r echo=T}
+strD <- c("First", "Second", "Third")
+# both paste {base} and str_c {stringr} are vectorized
+paste("Prefix-", strD, sep = "-") # - base R
+str_c("Prefix-", strD, sep = "-") # {stringr}
+```
+
+How to split strings into subcomponents? In {base} it's done by `strsplit()`, while {stringr} has 'str_split()':
+
+``` {r echo = T}
+# Splitting strings in R
+# with strsplit {base}
+string_1 <- "The quick brown fox jumps over the lazy dog"
+string_1
+```
+Base R:
+
+``` {r echo = T}
+splitA <- strsplit(string_1, " ") # is.list(splitA) == T
+splitA
+```
+
+`strsplit()` returns a list; `unlist()` it to get to your result:
+
+``` {r echo = T}
+splitA <- unlist(strsplit(string_1, " "))
+splitA
+```
+
+Extracting a part of it by combining `strsplit()` and `paste()`:
+
+``` {r echo = T}
+# "The quick brown" from "The quick brown fox jumps over the lazy dog"
+splitA <- paste(unlist(strsplit(string_1," "))[1:3], collapse = " ")
+splitA
+```
+
+``` {r echo = T}
+string_1
+```
+
+There's a `fixed` argument that you need to know about in `strsplit()`:
+
+``` {r echo = T}
+splitA <- strsplit(string_1," ")
+splitA
+```
+
+``` {r echo = T}
+splitA <- strsplit(string_1," ", fixed = T) 
+# fixed=T says: match the split argument 
+# exactly, otherwise, split is an regular expression; default is: fixed = FALSE
+splitA
+
+```
+
+The `str_split()` function in {stringr} has some very useful, additional functionality in comparison to {base} `strplit()`. For example:
+
+``` {r echo = T}
+string_11 <- "Above all, don't lie to yourself. The man who lies to himself and listens to his own lie comes to a point that he cannot distinguish the truth within him, or around him, and so loses all respect for himself and for others. And having no respect he ceases to love."
+string_11
+```
+
+``` {r echo = T}
+str_split(string_11, boundary("word"))
+```
+
+``` {r echo = T}
+# including punctuation and special characters
+str_split(string_11, boundary("word", skip_word_none = F))
+```
+
+
+#### 2.2 Subsetting and transforming strings
+
+See, I have a character vector, and I need only the first three characters from each component:
+
+``` {r echo = T}
+# Subsetting strings
+string_1 <- c("Data", "Science", "Serbia")
+# {base}
+substr(string_1, 1, 3)
+```
+
+Let's start transforming strings with `substr()`:
+
+``` {r echo = T}
+# {base}
+string_2 <- string_1 # just a copy of string_1
+substr(string_2, 1, 3) <- "WowWow" # check the result!
+string_2
+```
+
+``` {r echo = T}
+substr(string_2, 1, 4) <- "WowWow" # check the result!
+string_2
+```
+
+``` {r echo = T}
+substr(string_2, 1, 6) <- "WowWow" # check the result!
+string_2
+```
+
+UPPER CASE to lower case w. `tolower()`:
+
+``` {r echo = T}
+string_1 <- "Belgrade"
+# {base}
+tolower(string_1)
+```
+
+Now everything to UPPER CASE with {base} `toupper()`:
+
+``` {r echo = T}
+string_1 <- tolower(string_1)
+toupper(string_1)
+```
+
+A useful {stringr} function `str_to_title()` capitalizes only the first character:
+
+``` {r echo = T}
+string_1 <- c("belgrade", "paris", "london", "moscow")
+str_to_title(string_1)
+```
+
+Removing overhead white spaces from strings is a notorious operation in text-mining:
+
+``` {r echo = T}
+# Remove whitespace
+string_1 <- c("  Remove whitespace  ");
+string_1
+```
+
+There goes {stringr} `str_trim()` to clean-up:
+
+``` {r echo = T}
+str_trim(string_1) # {stringr}
+```
+
+There's a `side` argument that we use to remove the leading (side = 'left') and trailing (side = 'right') whitespaces:
+
+``` {r echo = T}
+# remove leading whitespace
+str_trim(string_1, side = "left")
+```
+
+``` {r echo = T}
+# remove trailing whitespace
+str_trim(string_1, side = "right")
+```
+
+Using {base} `gsub()` to remove all whitespace:
+
+``` {r echo = T}
+# remove all whitespace?
+string_1 <- c("  Remove    whitespace  ") # how about this one?
+string_1
+```
+
+``` {r echo = T}
+# there are different ways to do it. Try:
+gsub(" ", "", string_1, fixed = T) # (!(fixed==T)), the first (pattern) argument is regex
+```
+
+`gsub()` is definitely something you need to learn about:
+
+``` {r echo = T}
+# replacing, in general:
+string_1 <- "The quick brown fox jumps over the lazy dog The quick brown"
+gsub("The quick brown", "The slow red", string_1, fixed=T)
+```
+
+Again, mind the `fixed` argument - by default, `gsub()` likes regular expressions.
+
+#### 2.3 Searching in strings
+
+``` {r echo = T}
+string_1
+```
+
+Does `string_1` contain `The quick brown`?
+
+``` {r echo = T}
+# Searching for something in a string {stringr}
+str_detect(string_1, "The quick brown") # T or F
+```
+
+Where is it? Use `str_locate` from {stringr}:
+
+``` {r echo = T}
+str_locate(string_1, "The quick brown")[[1]] # first match
+```
+
+And what if there is more than one match?
+
+``` {r echo = T}
+str_locate_all(string_1, "The quick brown")[[1]] # all matches
+```
+
+You might have heard that people in text-mining use *term-frequency matrices* a lot. These matrices typically list all interesting terms from a set of documents in their rows, and the documents themselves are represented by columns; cell entries are counts that provide an information on how many times a particular term have occurred in a particular document.
+
+We will not build a full term-frequency matrix in R now (check the {tm} package for R's functionality in text-mining), but only demonstrate how to use `str_locate_all()` to count the number of occurrences:
+
+``` {r echo = T}
+# term frequency, as we know, is very important in text-mining:
+term1 <- str_locate_all(string_1, "The quick brown")[[1]] # all matches for term1 
+# ie. "The quick brown"
+term1
+```
+
+Hm, it's easy now:
+
+``` {r echo = T}
+dim(term1)[1] # how many matches = how many rows in the str_locate_all output matrix
+```
+
+#### 2.3 Sorting strings in R
+
+``` {r echo = T}
+# Sorting character vectors in R {base}
+string_1 <- c("New York", "Paris", "London", "Moscow", "Tokyo")
+string_1
+```
+
+It's really easy:
+
+``` {r echo = T}
+sort(string_1)
+```
+
+And with `decreasing=T`:
+
+``` {r echo = T}
+sort(string_1, decreasing = T)
+```
+
+
+### Further Readings
+
+- Once again: [Gaston Sanchez's "Handling and Processing Strings in R"](http://gastonsanchez.com/Handling_and_Processing_Strings_in_R.pdf) - the chances you will ever need more than what's covered in this text-book are slim.
+
+- **Regular Expressions**: go pro. [Regular-Expressions.info](http://www.regular-expressions.info/) is a well known learning resource. In order to figure out the specific regex standard used in R: [Regular Expressions as used in R](https://stat.ethz.ch/R-manual/R-devel/library/base/html/regex.html). [This section of Regular-Expressions.info](http://www.regular-expressions.info/rlanguage.html) is on regex in R specifically.
+
+
+### R Markdown
+
+[R Markdown](https://rmarkdown.rstudio.com/) is what I have used to produce this beautiful Notebook. We will learn more about it near the end of the course, but if you already feel ready to dive deep, here's a book: [R Markdown: The Definitive Guide, Yihui Xie, J. J. Allaire, Garrett Grolemunds.](https://bookdown.org/yihui/rmarkdown/) 
+
+### Exercises
+
+A specialized R Markdown Notebook on Regular expressions will be shared soon. The exercises will be found there.
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+

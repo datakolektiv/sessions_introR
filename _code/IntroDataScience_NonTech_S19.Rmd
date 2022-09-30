@@ -1,0 +1,716 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Session19
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Session 19. Cross-validation in classification problems. An introduction to Decision Trees: complicated classification problems and powerful solutions. Postpruning of a Decision Tree model.
+
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### What do we want to do today?
+
+We will first consider cross-validation in classification problems and contrast it with previously introduced approaches to model selection. Then we begin to go beyond Linear Models: we will introduce **Decision Trees** for classification and regression problems. In this session we go for an intuitive and practical approach to Decision Trees in R; in the next session we will introduce the basic elements of **Information Theory** and dig deeper into the theory of Decision Trees and even more powerful Random Forests.
+
+### 0. Setup
+
+```{r echo = T, eval = F}
+install.packages('rpart')
+install.packages ('rpart.plot')
+```
+
+Grab the `HR_comma_sep.csv` dataset from the [Kaggle](https://www.kaggle.com/liujiaqi/hr-comma-sepcsv) and place it in your `_data` directory for this session.
+
+```{r echo = T, message = F, warning = F}
+dataDir <- paste0(getwd(), "/_data/")
+library(tidyverse)
+library(data.table)
+library(rpart)
+library(rpart.plot)
+```
+
+
+### 1. Cross-Validation in Classification Problems
+
+Consider the `HR_comma_sep.csv` dataset:
+
+```{r echo = T, message = F, warning = F}
+dataSet <- read.csv(paste0('_data/', 'HR_comma_sep.csv'), 
+                    header = T, 
+                    check.names = F,
+                    stringsAsFactors = F)
+head(dataSet)
+```
+
+```{r echo = T, message = F, warning = F}
+table(dataSet$left)
+```
+
+The task is to predict the value of `left` - whether the employee has left the company or not - from a set of predictors encompassing the following:
+
+```{r echo = T, message = F, warning = F}
+glimpse(dataSet)
+```
+
+- **satisfaction_level**: a measure of employee's level of satisfaction
+- **last_evaluation**: the result of a last evaluation
+- **number_projects**: in how many projects did the employee took part
+- **average_monthly_hours**: how working hours monthly on average
+- **time_spend_company**: for how long is the employee with us
+- **Work_accident**: any work accidents?
+- **promotion_last_5years**: did the promotion occur in the last five years?
+- **sales**: department (sales, accounting, hr, technical, support, management, IT, product_mng, marketing, RandD)
+- **salary**: salary class (low, medium, high)
+
+Let's formulate a Binomial Logistic Regression model to try to predict `left` from `satisfaction_level`, `last_evaluation`, `sales`, and `salary`:
+
+```{r echo = T, message = F, warning = F}
+# - setups
+dataSet$left <- factor(dataSet$left, 
+                       levels = c(0, 1))
+dataSet$salary <- factor(dataSet$salary)
+dataSet$salary <- relevel(dataSet$salary,
+                          ref = 'high')
+dataSet$sales <- factor(dataSet$sales)
+dataSet$sales <- relevel(dataSet$sales,
+                         ref = 'RandD')
+# - model
+blr_model1 <- glm(left ~ satisfaction_level + last_evaluation + sales + salary,
+                  data = dataSet,
+                  family = "binomial")
+modelsummary <- summary(blr_model1)
+print(modelsummary)
+```
+
+And take a look at the regression coefficients:
+
+```{r echo = T, message = F, warning = F}
+exp(coefficients(blr_model1))
+```
+
+The Akaike Information Criterion is:
+
+```{r echo = T, message = F, warning = F}
+blr_model1$aic
+```
+
+Now consider a model encompassing all predictors from the `HR_comma_sep.csv`:
+
+```{r echo = T, message = F, warning = F}
+# - setups
+dataSet$Work_accident <- factor(dataSet$Work_accident,
+                                levels = c(0, 1))
+dataSet$promotion_last_5years <- factor(dataSet$promotion_last_5years,
+                                        levels = c(0, 1))
+
+# - model
+blr_model2 <- glm(left ~ .,
+                  data = dataSet,
+                  family = "binomial")
+modelsummary <- summary(blr_model2)
+print(modelsummary)
+```
+
+```{r echo = T, message = F, warning = F}
+exp(coefficients(blr_model2))
+```
+
+The Akaike Information Criterion is:
+
+```{r echo = T, message = F, warning = F}
+blr_model2$aic
+```
+
+Let's cross-validate our `blr_model1` and `blr_model2` now. We will perform the *k-fold* CV in the following way:
+
+- define four folds in the dataSet by randomly assigning each observation to fold 1, 2, 3, or 4;
+- for each `i` in `folds`: estimate the model on the remaining *dataSet[-i, ]* folds taken together
+- predict the observations in fold `i` from the fitted model,
+- compute model accuracy, FA rate, Hit rate for fold `i`,
+- observe the average accuracy (ROC) across all four folds.
+
+Here we go: define folds first.
+
+```{r echo = T, message = F, warning = F}
+dataSet$fold <- sample(1:4, size = dim(dataSet)[1], replace = T)
+table(dataSet$fold)
+```
+
+First for the narrower model:
+
+```{r echo = T, message = F, warning = F}
+cv1 <- lapply(1:4, function(x) {
+  
+  # - test and train datasets
+  test <- dataSet %>% 
+    dplyr::filter(fold == x) %>% 
+    dplyr::select(-fold)
+  train <- dataSet %>% 
+    dplyr::filter(fold != x) %>% 
+    dplyr::select(-fold)
+  
+  # - model on the training dataset
+  blrModel <- glm(left ~ satisfaction_level + last_evaluation + sales + salary,
+                  data = train,
+                  family = "binomial")
+  
+  # - predict on the test dataset
+  predictions <- predict(blrModel, 
+                         newdata = test, 
+                         type = "response")
+  predictions <- ifelse(predictions > .5, 1, 0)
+  
+  # - ROC analysis
+  acc <- sum(test$left == predictions)
+  acc <- acc/dim(test)[1]
+  hit <- sum(test$left == 1 & predictions == 1)
+  hit <- hit/sum(test$left == 1)
+  fa <- sum(test$left == 0 & predictions == 1)
+  fa <- fa/sum(test$left == 0)
+  return(data.frame(acc, hit, fa))
+})
+
+cv1 <- rbindlist(cv1)
+cv1$fold <- 1:4
+cv1 <- tidyr::pivot_longer(cv1,
+                           cols = -fold,
+                           names_to = 'measure',
+                           values_to = 'value')
+cv1$model <- 1
+print(cv1)
+```
+
+Now for the full model:
+
+```{r echo = T, message = F, warning = F}
+cv2 <- lapply(1:4, function(x) {
+  test <- dataSet %>% 
+    dplyr::filter(fold == x) %>% 
+    dplyr::select(-fold)
+  train <- dataSet %>% 
+    dplyr::filter(fold != x) %>% 
+    dplyr::select(-fold)
+  blrModel <- glm(left ~ .,
+                  data = train,
+                  family = "binomial")
+  predictions <- predict(blrModel, 
+                         newdata = test, 
+                         type = "response")
+  predictions <- ifelse(predictions > .5, 1, 0)
+  acc <- sum(test$left == predictions)
+  acc <- acc/dim(test)[1]
+  hit <- sum(test$left == 1 & predictions == 1)
+  hit <- hit/sum(test$left == 1)
+  fa <- sum(test$left == 0 & predictions == 1)
+  fa <- fa/sum(test$left == 0)
+  return(data.frame(acc, hit, fa))
+})
+cv2 <- rbindlist(cv2)
+cv2$fold <- 1:4
+cv2 <- tidyr::pivot_longer(cv2,
+                           cols = -fold,
+                           names_to = 'measure',
+                           values_to = 'value')
+cv2$model <- 2
+print(cv2)
+```
+
+Compare:
+
+```{r echo = T, message = F, warning = F, fig.width = 10, fig.height=3.5}
+modelSelection <- rbind(cv1, cv2)
+modelSelection$model <- ifelse(modelSelection$model == 1,
+                               "Partial", "Full")
+modelSelection$model <- factor(modelSelection$model)
+ggplot(data = modelSelection, 
+       aes(x = fold, 
+           y = value, 
+           group = model, 
+           color = model, 
+           fill = model)) + 
+  geom_path(size = .5) + 
+  geom_point(size = 3) + 
+  scale_color_manual(values = c('darkred', 'darkorange')) + 
+  ylim(0, 1) +
+  facet_wrap(~measure) + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(legend.text = element_text(size = 20)) +
+  theme(legend.title = element_text(size = 20)) +
+  theme(legend.position = "top") +
+  theme(strip.background = element_blank()) + 
+  theme(strip.text = element_text(size = 20)) +
+  theme(axis.title.x = element_text(size = 18)) + 
+  theme(axis.title.y = element_text(size = 18)) + 
+  theme(axis.text.x = element_text(size = 17)) + 
+  theme(axis.text.y = element_text(size = 17))
+```
+
+The average ROC from k-fold CV for both models:
+
+```{r echo = T, message = F, warning = F}
+modelSelection %>%
+  dplyr::select(-fold) %>% 
+  dplyr::group_by(model, measure) %>% 
+  dplyr::summarise(mean = round(mean(value), 5)) %>% 
+  tidyr::pivot_wider(id_cols = model, 
+                     names_from = 'measure', 
+                     values_from = 'mean')
+```
+Suppose we set the decision trashold to be `p = .2`. First for the narrow model:
+
+```{r echo = T, message = F, warning = F}
+cv1 <- lapply(1:4, function(x) {
+  
+  # - test and train datasets
+  test <- dataSet %>% 
+    dplyr::filter(fold == x) %>% 
+    dplyr::select(-fold)
+  train <- dataSet %>% 
+    dplyr::filter(fold != x) %>% 
+    dplyr::select(-fold)
+  
+  # - model on the training dataset
+  blrModel <- glm(left ~ satisfaction_level + last_evaluation + sales + salary,
+                  data = train,
+                  family = "binomial")
+  
+  # - predict on the test dataset
+  predictions <- predict(blrModel, 
+                         newdata = test, 
+                         type = "response")
+  predictions <- ifelse(predictions > .2, 1, 0)
+  
+  # - ROC analysis
+  acc <- sum(test$left == predictions)
+  acc <- acc/dim(test)[1]
+  hit <- sum(test$left == 1 & predictions == 1)
+  hit <- hit/sum(test$left == 1)
+  fa <- sum(test$left == 0 & predictions == 1)
+  fa <- fa/sum(test$left == 0)
+  return(data.frame(acc, hit, fa))
+})
+
+cv1 <- rbindlist(cv1)
+cv1$fold <- 1:4
+cv1 <- tidyr::pivot_longer(cv1,
+                           cols = -fold,
+                           names_to = 'measure',
+                           values_to = 'value')
+cv1$model <- 1
+```
+
+Now for the full model, decision treshold is `p = .2`:
+
+```{r echo = T, message = F, warning = F}
+cv2 <- lapply(1:4, function(x) {
+  test <- dataSet %>% 
+    dplyr::filter(fold == x) %>% 
+    dplyr::select(-fold)
+  train <- dataSet %>% 
+    dplyr::filter(fold != x) %>% 
+    dplyr::select(-fold)
+  blrModel <- glm(left ~ .,
+                  data = train,
+                  family = "binomial")
+  predictions <- predict(blrModel, 
+                         newdata = test, 
+                         type = "response")
+  predictions <- ifelse(predictions > .2, 1, 0)
+  acc <- sum(test$left == predictions)
+  acc <- acc/dim(test)[1]
+  hit <- sum(test$left == 1 & predictions == 1)
+  hit <- hit/sum(test$left == 1)
+  fa <- sum(test$left == 0 & predictions == 1)
+  fa <- fa/sum(test$left == 0)
+  return(data.frame(acc, hit, fa))
+})
+cv2 <- rbindlist(cv2)
+cv2$fold <- 1:4
+cv2 <- tidyr::pivot_longer(cv2,
+                           cols = -fold,
+                           names_to = 'measure',
+                           values_to = 'value')
+cv2$model <- 2
+```
+
+Compare:
+
+```{r echo = T, message = F, warning = F, fig.width = 10, fig.height=3.5}
+modelSelection <- rbind(cv1, cv2)
+modelSelection$model <- ifelse(modelSelection$model == 1,
+                               "Partial", "Full")
+modelSelection$model <- factor(modelSelection$model)
+ggplot(data = modelSelection, 
+       aes(x = fold, 
+           y = value, 
+           group = model, 
+           color = model, 
+           fill = model)) + 
+  geom_path(size = .5) + 
+  geom_point(size = 3) + 
+  scale_color_manual(values = c('darkred', 'darkorange')) + 
+  ylim(0, 1) +
+  facet_wrap(~measure) + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(legend.text = element_text(size = 20)) +
+  theme(legend.title = element_text(size = 20)) +
+  theme(legend.position = "top") +
+  theme(strip.background = element_blank()) + 
+  theme(strip.text = element_text(size = 20)) +
+  theme(axis.title.x = element_text(size = 18)) + 
+  theme(axis.title.y = element_text(size = 18)) + 
+  theme(axis.text.x = element_text(size = 17)) + 
+  theme(axis.text.y = element_text(size = 17))
+```
+
+Across a range of decision criteria, `dec_criterion <- seq(.01, .99, .01)`, initial model with four predictors:
+
+```{r echo = T, message = F, warning = F}
+cv1 <- lapply(1:4, function(x) {
+  
+  # - test and train datasets
+  test <- dataSet %>% 
+    dplyr::filter(fold == x) %>% 
+    dplyr::select(-fold)
+  train <- dataSet %>% 
+    dplyr::filter(fold != x) %>% 
+    dplyr::select(-fold)
+  
+  # - model on the training dataset
+  blrModel <- glm(left ~ satisfaction_level + last_evaluation + sales + salary,
+                  data = train,
+                  family = "binomial")
+  
+  # - predict on the test dataset
+  predictions <- predict(blrModel, 
+                         newdata = test, 
+                         type = "response")
+  dec_criterion <- seq(.01, .99, .01)
+  predictions <- lapply(dec_criterion, function(y) {
+    return(
+      ifelse(predictions > y, 1, 0)
+    )  
+  })
+  predictions <- t(Reduce(rbind, predictions))
+  roc <- apply(predictions, 2, function(y) {
+    # - ROC analysis
+    acc <- sum(test$left == y)
+    acc <- acc/dim(test)[1]
+    hit <- sum(test$left == 1 & y == 1)
+    hit <- hit/sum(test$left == 1)
+    fa <- sum(test$left == 0 & y == 1)
+    fa <- fa/sum(test$left == 0)
+    return(data.frame(acc, hit, fa))
+  })
+  roc <- rbindlist(roc)
+  roc$dec_criterion <- dec_criterion
+  roc$fold <- x
+  return(roc)
+})
+
+cv1 <- rbindlist(cv1)
+cv1 <- cv1 %>% 
+  dplyr::group_by(dec_criterion) %>%
+  dplyr::summarise(acc = mean(acc),
+                   hit = mean(hit),
+                   fa = mean(fa))
+cv1 <- tidyr::pivot_longer(cv1,
+                           cols = -dec_criterion,
+                           names_to = 'measure',
+                           values_to = 'value')
+cv1$model <- 1
+```
+
+For the full model, `dec_criterion <- seq(.01, .99, .01)`:
+
+```{r echo = T, message = F, warning = F}
+cv2 <- lapply(1:4, function(x) {
+  
+  # - test and train datasets
+  test <- dataSet %>% 
+    dplyr::filter(fold == x) %>% 
+    dplyr::select(-fold)
+  train <- dataSet %>% 
+    dplyr::filter(fold != x) %>% 
+    dplyr::select(-fold)
+  
+  # - model on the training dataset
+  blrModel <- glm(left ~ .,
+                  data = train,
+                  family = "binomial")
+  
+  # - predict on the test dataset
+  predictions <- predict(blrModel, 
+                         newdata = test, 
+                         type = "response")
+  dec_criterion <- seq(.01, .99, .01)
+  predictions <- lapply(dec_criterion, function(y) {
+    return(
+      ifelse(predictions > y, 1, 0)
+    )  
+  })
+  predictions <- t(Reduce(rbind, predictions))
+  roc <- apply(predictions, 2, function(y) {
+    # - ROC analysis
+    acc <- sum(test$left == y)
+    acc <- acc/dim(test)[1]
+    hit <- sum(test$left == 1 & y == 1)
+    hit <- hit/sum(test$left == 1)
+    fa <- sum(test$left == 0 & y == 1)
+    fa <- fa/sum(test$left == 0)
+    return(data.frame(acc, hit, fa))
+  })
+  roc <- rbindlist(roc)
+  roc$dec_criterion <- dec_criterion
+  roc$fold <- x
+  return(roc)
+})
+
+cv2 <- rbindlist(cv2)
+cv2 <- cv2 %>% 
+  dplyr::group_by(dec_criterion) %>%
+  dplyr::summarise(acc = mean(acc),
+                   hit = mean(hit),
+                   fa = mean(fa))
+cv2 <- tidyr::pivot_longer(cv2,
+                           cols = -dec_criterion,
+                           names_to = 'measure',
+                           values_to = 'value')
+cv2$model <- 2
+```
+
+Compare ROC curves:
+
+```{r echo = T, message = F, warning = F, fig.width = 4, fig.height=3}
+ROC_results <- rbind(cv1, cv2)
+ROC_results$model <- ifelse(ROC_results$model == 1,
+                               "Partial", "Full")
+ROC_results <- ROC_results %>% 
+  pivot_wider(id_cols = c('dec_criterion', 'model'), 
+              names_from = measure,
+              values_from = value)
+
+ROC_results$model <- factor(ROC_results$model)
+
+ggplot(data = ROC_results, 
+       aes(x = fa, 
+           y = hit, 
+           group = model,
+           color = model, 
+           fill = model)) +
+  ylab("Hit Rate (TPR)") + 
+  xlab("FA Rate (FPR)") +
+  geom_point(size = 1) + geom_path(size = .1) + 
+  geom_abline(intercept = 0, slope = 1, size = .5) + 
+  ggtitle("ROC analysis for the Binomial Regression Model") +
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = .5)) + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(plot.title = element_text(hjust = .5, size = 20)) + 
+  theme(legend.text = element_text(size = 20)) +
+  theme(legend.title = element_text(size = 20)) +
+  theme(legend.position = "top") +
+  theme(axis.title.x = element_text(size = 18)) + 
+  theme(axis.title.y = element_text(size = 18)) + 
+  theme(axis.text.x = element_text(size = 17)) + 
+  theme(axis.text.y = element_text(size = 17))
+```
+
+### 2. Decision Trees for Classification Problems
+
+What is a Decision Tree classifier? Let's introduce the Decision Tree by an example before diving into theory in the next session. We will use the `HR_comma_sep.csv` dataset again:
+
+```{r echo = T, message = F, warning = F}
+# - load HR_comma_sep.csv again
+dataSet <- read.csv(paste0('_data/', 'HR_comma_sep.csv'), 
+                    header = T, 
+                    check.names = F,
+                    stringsAsFactors = F)
+```
+
+Let's split `dataSet` into a *training* and *test* subsets:
+
+```{r echo = T, message = F, warning = F}
+# - Test and Train data:
+ix <- rbinom(dim(dataSet)[1] , 1, .5)
+table(ix)/sum(table(ix))
+```
+
+```{r echo = T, message = F, warning = F}
+train <- dataSet[ix == 1, ]
+test <- dataSet[ix == 0,]
+```
+
+Train one Decision Tree on `train`:
+
+```{r echo = T, message = F, warning = F}
+# - Base Model
+classTree <- rpart(left ~ ., 
+                   data = train, 
+                   method = "class")
+```
+
+Visualize the model with `prp()`:
+
+```{r echo = T, message = F, warning = F}
+prp(classTree, 
+    cex = .8)
+```
+Decision Trees can easily *overfit* because of the intrinsinc complexity of the model. *Pruning* is one of the methods to prevent the Decision Tree for overfitting: we *prune* the tree by relying on the *complexity parameter (cp)* to discard the branches that were developed to fit potentially idiosyncratic information present in the data. The CP (complexity parameter) is used to control tree growth: if the *cost of adding a variable* is higher then the value of CP then tree growth stops.
+
+The CP parameters has to do with *an internal cross-validation procedure* performed by {Rpart} during the training of a Decision Tree model (to be explained in our live session).
+
+```{r echo = T, message = F, warning = F}
+# - Base Model
+classTree <- rpart(left ~ ., 
+                   data = train, 
+                   method = "class",
+                   control = rpart.control(cp = 0))
+# - Inspect model:
+prp(classTree, 
+    cex = .8)
+```
+
+
+```{r echo = T, message = F, warning = F}
+# - Examine the complexity plot
+cptable <- as.data.frame(classTree$cptable)
+print(cptable)
+```
+
+```{r echo = T, message = F, warning = F}
+plotcp(classTree)
+```
+The one with least **cross-validated error (xerror)** is the optimal value of CP.
+
+```{r echo = T, message = F, warning = F}
+cptable[which.min(cptable$xerror), ]
+```
+
+ROC analysis for the base model:
+
+```{r echo = T, message = F, warning = F}
+# - Base Model Accuracy
+test$pred <- predict(classTree,
+                     test,
+                     type = "class")
+# - silly, but I need to do this...
+test$pred <- as.numeric(as.character(test$pred))
+base_accuracy <- mean(test$pred == test$left)
+print(paste0("Base model acc: ", base_accuracy))
+```
+
+```{r echo = T, message = F, warning = F}
+# - Base Model ROC
+test$hit <- ifelse(test$pred == 1 & test$left == 1, T, F)
+test$FA <- ifelse(test$pred == 1 & test$left == 0, T, F)
+hitRate <- sum(test$hit)/length(test$hit)
+print(paste0("Base model Hit rate: ", hitRate))
+```
+
+```{r echo = T, message = F, warning = F}
+FARate <- sum(test$FA)/length(test$FA)
+print(paste0("Base model FA rate: ", FARate))
+```
+
+```{r echo = T, message = F, warning = F}
+test$miss <- ifelse(test$pred == 0 & test$left == 1, T, F)
+missRate <- sum(test$miss)/length(test$miss)
+print(paste0("Base model Miss rate: ", missRate))
+```
+
+```{r echo = T, message = F, warning = F}
+# - Prune the classTree based on the optimal cp value
+optimal_cp <- cptable$CP[which.min(cptable$xerror)]
+classTree_prunned <- prune(classTree, 
+                           cp = optimal_cp)
+```
+
+```{r echo = T, message = F, warning = F}
+prp(classTree_prunned, 
+    cex = .75)
+```
+
+```{r echo = T, message = F, warning = F}
+# - The accuracy of the pruned tree
+test$pred <- predict(classTree_prunned, 
+                     test, 
+                     type = "class")
+accuracy_postprun <- mean(test$pred == test$left)
+print(paste0("Pruned model acc: ", accuracy_postprun))
+```
+
+```{r echo = T, message = F, warning = F}
+# - Pruned Model ROC
+test$hit <- ifelse(test$pred == 1 & test$left == 1, T, F)
+test$FA <- ifelse(test$pred == 1 & test$left == 0, T, F)
+hitRate <- sum(test$hit)/length(test$hit)
+print(paste0("Pruned Hit rate: ", hitRate))
+```
+
+```{r echo = T, message = F, warning = F}
+FARate <- sum(test$FA)/length(test$FA)
+print(paste0("Pruned FA rate: ", FARate))
+```
+
+```{r echo = T, message = F, warning = F}
+test$miss <- ifelse(test$pred == 0 & test$left == 1, T, F)
+missRate <- sum(test$miss)/length(test$miss)
+print(paste0("Pruned Miss rate: ", missRate))
+```
+
+```{r echo = T, message = F, warning = F}
+test$CR <- ifelse(test$pred == 0 & test$left == 0, T, F)
+CRRate <- sum(test$CR)/length(test$CR)
+print(paste0("Pruned CR rate: ", CRRate))
+```
+
+For pruning with {rpart} Decison Trees in R, see the following Stack Overflow discussion: [Selecting cp value for decision tree pruning using rpart](https://stackoverflow.com/questions/37721047/selecting-cp-value-for-decision-tree-pruning-using-rpart).
+
+***
+
+### Further Readings
+
++ [The Elements of Statistical Learning, Hastie, T., Tibshirani, R. & Friedman, J., 12th printing with corrections and table of contents, Jan 2017, Chapter 9.2 Tree-Based Methods)](https://web.stanford.edu/~hastie/ElemStatLearn/printings/ESLII_print12_toc.pdf)
+
++ [An Introduction to Recursive Partitioning Using the RPART Routines, Terry M. Therneau, Elizabeth J. Atkinson, Mayo Foundation, April 11, 2019](https://cran.r-project.org/web/packages/rpart/vignettes/longintro.pdf)
+
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+

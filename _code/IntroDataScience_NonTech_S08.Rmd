@@ -1,0 +1,689 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Session08
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Session 08: More Probability Theory in R + Serious data wrangling with {dplyr} and {tidyr}
+
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### What do we want to do today?
+
+We will (a) continue to expand our knowledge of Probability Theory and numerical simulation, while (b) systematizing our data management skills and the control of data processing pipelines with {tidyverse}. We begin by a concise *repetitorium* of probability functions: probability mass and density, the cumulative distribution. The we learn about the important *Poisson distribution*. We will then explain the importance of the *Central Limit Theorem* and introduce *The Sampling Distribution of The Sample Mean* to learn about the concept of the *standard error*. And finally we dive into {tidyverse} to discuss the wide and long data representations in some detail.
+
+
+### 0. Prerequisits
+
+```{r echo = T, message = F, warning = F}
+library(tidyverse)
+set.seed(9999)
+```
+
+### 1. Probability Functions, again
+
+#### 1.1 Probability Density, Probability Mass, Cumulative Distribution, and Probability
+
+Let remind ourselves what quantity exactly does the Binomial Distribution model:
+
+> The Binomial distribution models the following, basic statistical experiment: (1) toss a coin that has a probability $p$ for Heads; repeat the experiment $n$ times. The distribution models the number of "*successes*" (e.g. obtaining Heads) in $n$ repeated tosses; each coin toss is known as a *Bernoulli trial* - and constitutes an even more elementary statistical experiment on its own.
+
+So the Binomial distribution tells us about the probability to obtain Heads say *k* times from a coin with the probability of resulting in Heads described by `p` which will be tossed `n` times. Now, there are two functions to consider in relation to the Binomial experiment: (a) the Probability Mass Function, and (b) the Cumulative Distribution Function.
+
+```{r echo = T}
+heads <- 1:100
+binomialProbability <- dbinom(heads, size = 100, p = .5)
+sum(binomialProbability)
+```
+
+Now... `sum(binomialProbability) == 1` is `TRUE` because this is a *discrete distribution* so its Probability Mass Functions *outputs probability* indeed.
+
+```{r echo = T}
+binomialProbability <- data.frame(heads = heads,
+                                  density = binomialProbability)
+ggplot(binomialProbability, 
+       aes(x = heads, 
+           y = density)) + 
+  geom_bar(stat = "identity", 
+           fill = 'deepskyblue',
+           color = 'deepskyblue') +
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+The Binomial Cumulative Distribution, on the other hand:
+
+```{r echo = T}
+heads <- 1:100
+binomialProbability <- pbinom(heads, size = 100, p = .5)
+sum(binomialProbability)
+```
+
+```{r echo = T}
+binomialProbability <- data.frame(heads = heads,
+                                  cumprob = binomialProbability)
+ggplot(binomialProbability, 
+       aes(x = heads, 
+           y = cumprob)) + 
+  geom_bar(stat = "identity", 
+           fill = 'deepskyblue',
+           color = 'deepskyblue') +
+  ylab("P(heads <= x)") + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+What is the probability to obtain 33 heads in 100 tosses of a fair coin? From the Probability Mass Function:
+
+```{r echo = T}
+dbinom(33, size = 100, p = .5)
+```
+
+From the Cumulative Distribution Function:
+
+```{r echo = T}
+pbinom(33, size = 100, p = .5) - pbinom(32, size = 100, p = .5)
+```
+
+See? Do you now understand how to obtain probability *for discrete events* from both functions? Now, for statistical experiments with continuous outcomes, such as those modeled by the Normal Distribution, the things are different. Recall that `P(X == x)` - the probability of some *exact*, *real* value - is always zero. That is simply the nature of the continuum. What we can obtain from continuous probability functions is a probability that some value falls in some precisely defined interval. If we would want to do that from a Probability Density Function, we would need to *integrate* that function across that interval. But that is probably what you do not want to do, because there is a way simpler approach, illustrated with `pbinom()` in the example with the Binomial experiment above. Assume that we are observing people in a population with an average height of 174 cm, with the standard deviation of 10 cm. What is the probability to randomly meet anyone who is less than (or equal) 180 cm tall?
+
+```{r echo = T}
+pnorm(180, mean = 174, sd = 10)
+```
+
+And what is the probability to randomly observe a person between 160 cm and 180 cm?
+
+```{r echo = T}
+pnorm(180, mean = 174, sd = 10) - pnorm(160, mean = 174, sd = 10)
+```
+
+That is how you obtain the probability of real-valued, continuous statistical outcomes. Let's plot the Probability Density and the Cumulative Distribution functions for this statistical experiment. Density first:
+
+```{r echo = T}
+observations <- 1:300
+normalProbability <- dnorm(observations, mean = 174, sd = 10)
+sum(normalProbability)
+```
+
+Wait, *one* again? But... that is a Probability Density Function, not a Probability Mass Function of a discrete random outcome..? I will explain this in our Session!
+
+```{r echo = T}
+normalProbability <- data.frame(observations = observations,
+                                density = normalProbability)
+ggplot(normalProbability, 
+       aes(x = observations, 
+           y = density)) + 
+  geom_bar(stat = "identity", 
+           fill = 'darkorange',
+           color = 'darkorange') +
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+```{r echo = T}
+observations <- 1:300
+normalProbability <- pnorm(observations, mean = 174, sd = 10)
+sum(normalProbability)
+```
+
+```{r echo = T}
+normalProbability <- data.frame(observations = observations,
+                                density = normalProbability)
+ggplot(normalProbability, 
+       aes(x = observations, 
+           y = density)) + 
+  geom_bar(stat = "identity", 
+           fill = 'darkorange',
+           color = 'darkorange') +
+  ylab("P(heads <= x)") + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+#### 1.2 The Poisson Distribution
+
+*Poisson* is a discrete probability distribution with *mean and variance correlated*. This is the distribution of the number of occurrences of independent events in a given interval.
+
+The p.m.f. is given by:
+
+$${P(X=k)} = \frac{\lambda^{k}e^{-\lambda}}{k!}$$
+where $\lambda$ is the average number of events per interval, and $k = 0, 1, 2,...$
+
+For the Poisson distribution, we have that the mean (the expectation) is the same as the variance:
+
+$$X \sim Poisson(\lambda) \Rightarrow \lambda = E(X) = Var(X) $$
+
+*Example.* (Following and adapting from Ladislaus Bortkiewicz, 1898). Assumption: on the average, 10 soldiers in the Prussian army were killed accidentally by horse kick monthly. What is the probability that 17 or more soldiers in the Prussian army will be accidentally killed by horse kicks during the month? Let's see:
+
+``` {r echo = T}
+tragedies <- ppois(17, lambda=10, lower.tail=FALSE)   # upper tail (!)
+tragedies
+```
+
+Similarly as we have used `pbinom()` to compute cumulative probability from the binomial distribution, here we have used `ppois()` for the Poisson distribution. The `lower.tail=F` argument turned the cumulative into a decumulative (or survivor) function: by calling `ppois(17, lambda=10, lower.tail=FALSE)` we have asked not for $P(X \leq k)$, but for $P(X > k)$ instead. However, if this is the case, our answer is incorrect, and we should have called: `ppois(16, lambda=10, lower.tail=FALSE)` instead. Can you see it? You have to be very careful about how exactly your probability functions are defined (c.f. `Poisson {stats}` documentation at (https://stat.ethz.ch/R-manual/R-devel/library/stats/html/Poisson.html) and find out whether `lower.tail=T` implies $P(X > k)$ or $P(X \geq k)$).
+
+``` {r echo = T}
+# Compare:
+tragedies <- ppois(17, lambda=10, lower.tail=TRUE)   # lower tail (!)
+tragedies
+```
+
+This ^^ is the answer to the question of what would be the probability of 17 *and and less than 17* deaths.
+
+The same logic to generate random deviates as we have observed in the Binomial case is present here; we have `rpois()`:
+
+``` {r echo = T}
+poissonDeviates <- rpois(100000,lambda = 5)
+poissonDeviates <- data.frame(events = poissonDeviates)
+ggplot(poissonDeviates, 
+       aes(x = events)) + 
+  geom_histogram(binwidth = 1, 
+                 fill = 'yellow', 
+                 color = 'black') +
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+Observe how the shape of the Poisson distribution changes with its mean and variance, both represented as $\lambda$:
+
+``` {r echo = T}
+lambda <- 1:20
+poissonDeviates <- lapply(lambda, rpois, n = 1000)
+poissonDeviates <- reduce(poissonDeviates, rbind)
+dim(poissonDeviates)
+```
+
+Ok, then:
+
+```{r echo = T}
+poissonDeviates <- as.data.frame(poissonDeviates)
+poissonDeviates$id <- 1:dim(poissonDeviates)[1]
+poissonDeviates <- poissonDeviates %>% 
+  pivot_longer(cols = -id) %>% 
+  select(-name)
+poissonDeviates$id <- factor(poissonDeviates$id, 
+                             levels = sort(unique(poissonDeviates$id)))
+```
+
+and finally:
+
+```{r echo = T, fig.height = 5}
+ggplot(poissonDeviates, 
+       aes(x = value)) + 
+  geom_histogram(binwidth = 1, 
+                 fill = 'yellow', 
+                 color = 'black') +
+  xlab("Events") + 
+  ggtitle(expression(lambda)) + 
+  facet_wrap(~id, scales = "free_x") +
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(strip.background = element_blank()) + 
+  theme(strip.text =  element_text(size = 6.5)) +
+  theme(plot.title = element_text(hjust = .5))
+```
+
+Let's study one important property of the Poisson distribution:
+
+``` {r echo = T}
+lambda <- 1:100
+poissonMean <- sapply(lambda, function(x) {
+  mean(rpois(100000,x))
+})
+poissonVar <- sapply(lambda, function(x) {
+  var(rpois(100000,x))
+})
+poissonProperty <- data.frame(mean = poissonMean, 
+                              variance = poissonVar)
+ggplot(poissonProperty, 
+       aes(x = mean, 
+           y = variance)) + 
+  geom_line(color = "firebrick", size = .25) + 
+  geom_point(color = "firebrick", fill = "firebrick", size = 1.5) + 
+  xlab("E(X)") + ylab("Var(X)") + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) 
+```
+
+#### 1.3 The Central Limit Theorem
+
+In the following set of numerical simulations we want to do the following:
+
+- define a probability distribution by providing a set of parameters, say $\mu$ and $\sigma^2$ for the Normal, or $\lambda$ for the Poisson, or **n** and **p** for the Binomial;
+- each time we pick a distribution, we take 
+ - a random sample of size `sampleN <- 100`, 
+ - compute the **mean** of the obtained random numbers, and then 
+ - we repeat that either 10, or 100, or 1,000, or 10,000 times (varies as: `meanSizes <- c(10, 100, 1000, 10000)`).
+ 
+Let's see what happens:
+
+``` {r echo=T}
+sampleN <- 100
+meanSizes <- c(10, 100, 1000, 10000)
+```
+
+Poisson with $\lambda = 1$:
+
+``` {r echo=T}
+# - Poisson with lambda = 1
+lambda = 1
+# - Set plot  parameters
+par(mfrow = c(2, 2))
+# - Plot!
+for (meanSize in meanSizes) {
+  poisMeans <- sapply(1:meanSize, 
+                            function(x) {
+                              mean(rpois(sampleN, lambda))
+                              }
+                     )
+  hist(poisMeans, 50, col="red",
+       main = paste0("N samples = ", meanSize),
+       cex.main = .75)
+}
+```
+
+Poisson with $\lambda = 2$:
+
+``` {r echo=T}
+# - Poisson with lambda = 2
+lambda = 2
+# - Set plot  parameters
+par(mfrow = c(2, 2))
+# - Plot!
+for (meanSize in meanSizes) {
+  poisMeans <- sapply(1:meanSize, 
+                            function(x) {
+                              mean(rpois(sampleN, lambda))
+                              }
+                     )
+  hist(poisMeans, 50, col="red",
+       main = paste0("N samples = ", meanSize),
+       cex.main = .75)
+}
+```
+
+Poisson with $\lambda = 10$:
+
+``` {r echo=T}
+# - Poisson with lambda = 10
+lambda = 10
+# - Set plot  parameters
+par(mfrow = c(2, 2))
+# - Plot!
+for (meanSize in meanSizes) {
+  poisMeans <- sapply(1:meanSize, 
+                            function(x) {
+                              mean(rpois(sampleN, lambda))
+                              }
+                     )
+  hist(poisMeans, 50, col="red",
+       main = paste0("N samples = ", meanSize),
+       cex.main = .75)
+}
+```
+Binomial with **p** = .1 and **n** = 1000:
+
+``` {r echo=T}
+# - Binomial with p = .1 and n = 1000
+p = .1
+n = 1000
+# - Set plot  parameters
+par(mfrow = c(2, 2))
+# - Plot!
+for (meanSize in meanSizes) {
+  binomMeans <- sapply(1:meanSize, 
+                            function(x) {
+                              mean(rbinom(n = sampleN, size = n, prob = p))                              }
+                     )
+  hist(binomMeans, 50, col="darkorange",
+       main = paste0("N samples = ", meanSize),
+       cex.main = .75)
+}
+```
+
+Binomial with **p** = .5 and **n** = 1000:
+
+``` {r echo=T}
+# - Binomial with p = .5 and n = 1000
+p = .5
+n = 100
+# - Set plot  parameters
+par(mfrow = c(2, 2))
+# - Plot!
+for (meanSize in meanSizes) {
+  binomMeans <- sapply(1:meanSize, 
+                            function(x) {
+                              mean(rbinom(n = sampleN, size = n, prob = p))
+                              }
+                     )
+  hist(binomMeans, 50, col="darkorange",
+       main = paste0("N samples = ", meanSize),
+       cex.main = .75)
+}
+```
+Normal with $\mu = 10$ and $\sigma = 1.5$:
+
+``` {r echo=T}
+# - Normal with mean = 10 and sd = 1.5
+mean = 10
+sd = 1.5
+# - Set plot  parameters
+par(mfrow = c(2, 2))
+# - Plot!
+for (meanSize in meanSizes) {
+  normalMeans <- sapply(1:meanSize, 
+                            function(x) {
+                              mean(rnorm(sampleN, mean = mean, sd = sd))
+                              }
+                     )
+  hist(normalMeans, 50, col="lightblue",
+       main = paste0("N samples = ", meanSize),
+       cex.main = .75)
+}
+```
+Normal with $\mu = 175$ and $\sigma = 11.4$:
+
+``` {r echo=T}
+# - Normal with mean = 175 and sd = 11.4
+mean = 175
+sd = 11.4
+# - Set plot  parameters
+par(mfrow = c(2, 2))
+# - Plot!
+for (meanSize in meanSizes) {
+  normalMeans <- sapply(1:meanSize, 
+                            function(x) {
+                              mean(rnorm(sampleN, mean = mean, sd = sd))
+                              }
+                     )
+  hist(normalMeans, 50, col="lightblue",
+       main = paste0("N samples = ", meanSize),
+       cex.main = .75)
+}
+```
+Normal with $\mu = 100$ and $\sigma = 25$:
+
+``` {r echo=T}
+# - Normal with mean = 100 and sd = 25
+mean = 100
+sd = 25
+# - Set plot  parameters
+par(mfrow = c(2, 2))
+# - Plot!
+for (meanSize in meanSizes) {
+  normalMeans <- sapply(1:meanSize, 
+                            function(x) {
+                              mean(rnorm(sampleN, mean = mean, sd = sd))
+                              }
+                     )
+  hist(normalMeans, 50, col="lightblue",
+       main = paste0("N samples = ", meanSize),
+       cex.main = .75)
+}
+```
+
+What happens if we start increasing `sampleN` and keep the number of samples at some decent number, say `meanSize = 10000`?
+
+``` {r echo=T}
+sampleN <- c(10, 100, 1000, 100000)
+meanSize <- c(10000)
+```
+
+Poisson with $\lambda = 3$:
+
+``` {r echo=T}
+# - Poisson with lambda = 1
+lambda = 3
+# - Set plot  parameters
+par(mfrow = c(2, 2))
+# - Plot!
+for (sampleN in sampleN) {
+  poisMeans <- sapply(1:meanSize, 
+                            function(x) {
+                              mean(rpois(sampleN, lambda))
+                              }
+                     )
+  hist(poisMeans, 50, col="red",
+       main = paste0("Sample N = ", sampleN),
+       cex.main = .75)
+}
+```
+Normal with $\mu = 10$ and $\sigma = .75$:
+
+``` {r echo=T}
+sampleN <- c(10, 100, 1000, 100000)
+meanSize <- c(10000)
+```
+
+``` {r echo=T}
+# - Normal with mean = 10 and sd = .75
+mean = 10
+sd = .75
+# - Set plot  parameters
+par(mfrow = c(2, 2))
+# - Plot!
+for (sampleN in sampleN) {
+  normMeans <- sapply(1:meanSize, 
+                            function(x) {
+                              mean(rnorm(sampleN, mean = mean, sd = sd))
+                              }
+                     )
+  hist(normMeans, 50, col="lightblue",
+       main = paste0("Sample N = ", sampleN),
+       cex.main = .75)
+}
+```
+
+All the same as the number of samples increase? **Exactly**:
+
+> Central Limit Theorem. In probability theory, the central limit theorem (CLT) establishes that, in many situations, when independent random variables are added, their properly normalized sum tends toward a normal distribution (informally a bell curve) even if the original variables themselves are not normally distributed. The theorem is a key concept in probability theory because it implies that probabilistic and statistical methods that work for normal distributions can be applicable to many problems involving other types of distributions. Source: [Central Limit Theorem, English Wikipedia, accessed: 2021/02/17](https://en.wikipedia.org/wiki/Central_limit_theorem)
+
+Does it **always work**? Strictly: NO. Enter [Cauchy Distribution](https://en.wikipedia.org/wiki/Cauchy_distribution):
+
+``` {r echo=T}
+# - Cauchy with location = 0, scale = 1
+# - set plot  parameters
+par(mfrow=c(2,2))
+# - plot!
+for (meanSize in c(100, 1000, 10000, 100000)) {
+  cauchySums <- unlist(lapply(seq(1:meanSize), function(x) {
+    sum(rcauchy(1000, location = 0, scale = 1))
+  }))
+  hist(cauchySums, 50, col="orange",
+       main = paste("N samples = ", meanSize, sep=""),
+       cex.main = .75)
+}
+```
+
+... also known as [The Witch of Agnesi](https://en.wikipedia.org/wiki/Witch_of_Agnesi)... 
+
+
+#### 1.4 The Sampling Distribution of the Sample Mean
+
+Let's assume that some quantity in reality follows a Normal Distribution with $\mu$ = 100 and $\sigma$ = 12, and draw many, many random samples of size `100` from this distribution:
+
+```{r echo = T}
+n_samples <- 100000
+sampleMeans <- sapply(1:n_samples,
+                      function(x) {
+                        mean(rnorm(n = 100, mean = 100, sd = 12))
+                        })
+sampleMeans <- data.frame(sampleMean = sampleMeans)
+ggplot(sampleMeans, 
+       aes(x = sampleMean)) + 
+  geom_histogram(binwidth = .1, 
+                 fill = 'purple', 
+                 color = 'black') +
+  ggtitle("Sampling Distribution of a Mean") +
+  xlab("Sample Mean") + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+What is the standard deviation of `sampleMeans`?
+
+```{r echo = T}
+sd(sampleMeans$sampleMean)
+```
+
+And recall that the **population standard deviation** was defined to be **12**. Now:
+
+```{r echo = T}
+12/sqrt(100)
+```
+
+And this is roughly the same, right? 
+
+The standard deviation of the **sampling distribution of a mean** - also known as the **standard error** - is equal to the standard deviation of the **population** (i.e. the *true distribution*) divided by $\sqrt(N)$: 
+
+$$\sigma_\widetilde{x} = \sigma/\sqrt(N)$$
+
+and that means that if we know the **sample standard deviation**
+
+> Standard deviation (SD) measures the dispersion of a dataset relative to its mean. Standard error of the mean (SEM) measured how much discrepancy there is likely to be in a sample's mean compared to the population mean.
+The SEM takes the SD and divides it by the square root of the sample size. Source: [Investopedia, Standard Error of the Mean vs. Standard Deviation: The Difference](https://www.investopedia.com/ask/answers/042415/what-difference-between-standard-error-means-and-standard-deviation.asp)
+
+### 2. {Tidyverse}, again: tidy data principles
+
+#### 2.1 {tidyr}: long and wide representations
+
+Although we have mentioned the difference between long and wide data representations in our previous sessions, we need to get really systematic about it. We will study the most important functions in the {tidyr} package, `pivot_longer()` and `pivot_wider()`, and mention two additional nice functions along the way: `separate()` and `unite()`.
+
+```{r echo = T}
+data(iris)
+head(iris)
+```
+
+We have seen the `iris` dataset before. Now, in its native representation, `iris` is wide. We now want to go from wide to long and then to wide again with `iris`. Let's go long first:
+
+```{r echo = T, warning = F, message = F}
+# - Naive approach
+longIris <- pivot_longer(
+  data = iris,
+  cols = -Species,
+  names_to = "Measurement",
+  values_to = "Value"
+)
+head(longIris, 10)
+```
+Now we want to go into a wide data format, and naively use `pivot_wider()`:
+
+```{r echo = T, warning = F, message = F}
+wideIris <- pivot_wider(
+  data = longIris,
+  names_from = "Measurement",
+  values_from = "Value"
+)
+head(wideIris)
+```
+
+Ooops. What exactly has happened to the long `iris` upon our `pivot_wider()` call?
+We obviously need a more cautious approach. Take home lesson: **always** introduce an **id** column to your dataset while it is *tidy*, e.g. presented in the wide format where each column is a variable, each row an observation, and each cell represents a uniquely identifiable value.
+
+```{r echo = T, warning = F, message = F}
+# - Critical approach
+iris$id <- 1:dim(iris)[1]
+longIris <- pivot_longer(
+  data = iris,
+  cols = -c('Species', 'id'),
+  names_to = "Measurement",
+  values_to = "Value"
+)
+head(longIris)
+```
+
+Let's transform `iris` to a wide representation again, this time using `id`, and `Species` as `id_cols` in `pivot_wider()`:
+
+```{r echo = T, warning = F, message = F}
+wideIris <- pivot_wider(
+  data = longIris,
+  id_cols = c("id", "Species"),
+  names_from = "Measurement",
+  values_from = "Value"
+)
+head(wideIris)
+```
+
+Now that works way better.
+
+Two more {tidyr} functions, `separate()` and `unite()`:
+
+```{r echo = T}
+dataSet <- data.frame(Name = c('Peter.Murphy', 'David.Bowie', 'John.Zorn'), 
+                      City = c('Northampton', 'Brixton', 'New York'), 
+                      stringsAsFactors = F)
+dataSet
+```
+
+The names, obviously:
+
+```{r echo = T}
+dataSet <- dataSet %>% separate(Name, 
+                     sep = "\\.", 
+                     into = c("Name", "Family Name"))
+dataSet
+```
+
+And from `separate()` back to `unite()` with {tidyr}:
+
+```{r echo = T}
+dataSet %>% unite(col = "Name",
+                  sep = ".",
+                  "Name", "Family Name")
+```
+
+### Further Readings
+
+- [Probability concepts explained: probability distributions (introduction part 3) by Jonny Brooks-Bartlett, from Towards Data Science](https://towardsdatascience.com/probability-concepts-explained-probability-distributions-introduction-part-3-4a5db81858dc)
+- [Grinstead and Snell’s Introduction to Probability (NOTE: The Bible of Probability Theory)](https://math.dartmouth.edu/~prob/prob/prob.pdf). Definitely not an introductory material, but everything from Chapter 1. and up to Chapter 9. at least is (a) super-interesting to learn, (b) super-useful in Data Science, and (c) most Data Science practitioners already know it (or should know it). Enjoy!
+- [More on Probability Functions in R: 2.1 Random Variables and Probability Distributions from Introduction to Econometrics with R](https://www.econometrics-with-r.org/2-1-random-variables-and-probability-distributions.html)
+- [Chapter 12, Tidy data, Hadley Wickham & Garrett Grolemund](https://r4ds.had.co.nz/tidy-data.html)
+
+
+### Some Introductory Video Material
+
+- [Khan Academy: Central Limit Theorem](https://www.khanacademy.org/math/ap-statistics/sampling-distribution-ap/sampling-distribution-mean/v/central-limit-theorem)
+- [Khan Academy: Sampling distribution of the sample mean](https://www.khanacademy.org/math/ap-statistics/sampling-distribution-ap/sampling-distribution-mean/v/sampling-distribution-of-the-sample-mean)
+- [Sampling distribution of the sample mean (part 2)](https://www.khanacademy.org/math/ap-statistics/sampling-distribution-ap/sampling-distribution-mean/v/sampling-distribution-of-the-sample-mean-2)
+- [Standard error of the mean](https://www.khanacademy.org/math/ap-statistics/sampling-distribution-ap/sampling-distribution-mean/v/standard-error-of-the-mean)
+
+### R Markdown
+
+[R Markdown](https://rmarkdown.rstudio.com/) is what I have used to produce this beautiful Notebook. We will learn more about it near the end of the course, but if you already feel ready to dive deep, here's a book: [R Markdown: The Definitive Guide, Yihui Xie, J. J. Allaire, Garrett Grolemunds.](https://bookdown.org/yihui/rmarkdown/) 
+
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+

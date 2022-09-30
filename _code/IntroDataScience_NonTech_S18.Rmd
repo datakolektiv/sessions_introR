@@ -1,0 +1,433 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Session18
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Session 18. Generalized Linear Models III. Poisson regression. Negative binomial regression. Cross-validation in Regression problems.
+
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### What do we want to do today?
+
+We will complete our journey into the world of Generalized Linear Models (GLMs) by discussing the application of the *Poisson regression* for count data and its generalization known as *Negative bionomial regression* which can help save the day when Poisson regression fails. We will then introduce *cross-validation*: a very important and extremely useful model selection procedure. In this Session we will discuss two forms of cross-validation (CV): the *Leave-Out-One-CV (LOOCV)* and the *K-fold CV*.
+
+### 0. Setup
+
+Grab the `fHH1.csv` dataset from the [proback/BeyondMLR](https://github.com/proback/BeyondMLR/tree/master/data).
+
+```{r echo = T, message = F, warning = F}
+dataDir <- paste0(getwd(), "/_data/")
+library(tidyverse)
+library(data.table)
+library(car)
+library(ggrepel)
+```
+
+
+### 1. Poisson Regression
+
+#### 1.1 The Poisson Regression Model
+
+As in all GLMs in general, the problem to be solved is how to apply the Linear Model in a situation where our data fail to satisfy its assumptions. The *Poisson regression* deals with the situation where our observations - the outcome variable - are *counts per some unit of time or space*. Remember the Poisson distribution, introduced earlier in our sessions, that is used to model the frequency of occurrences in a given time interval (or spatial area as well)? Its probability density is given by:
+
+$$f(k; \lambda) = P(X = k) = \frac{\lambda^ke^{-\lambda}}{k!}$$
+where $k$ is the number of occurrences, $k=0,1,2,...$, $e$ is the Euler number $e=2.7182...$, and $\lambda$ is the only distribution parameter which represents the Poisson distribution *mean and variance* at the same time, $\lambda = E(x) = Var(x)$.
+
+To introduce the crucial model assumption precisely before we derive the model, Poisson regression assumes the response variable $Y$ has a Poisson distribution, and assumes the *logarithm of its expected value* can be modeled by a linear combination of (a) predictors and (b) coefficients (that need to be estimated, of course). More precisely, the Poisson regression models $\lambda_i$, the average number of occurrences of a phenomenon, as a function of one or more predictors. For example, we could consider the average number of car accidents in some state **S** in year **Y** as a function of a specific set of regulations that were in force in that state in that year. Let's take a closer look at the model:
+
+$$log(\lambda_i) = \beta_0 + \beta_1x_i$$
+
+or more generally
+
+$$log(\lambda) = \beta_0 + \beta_1X$$
+
+while assuming that where the observed values$Y_i$ follow a Poisson distribution with $\lambda = \lambda_i$ for a given $x_i$. For each observation then we could have a different value of $\lambda$ depending on a particular value of the predictor $X$. The model is easily expanded to encompass more predictors:
+
+$$log(\lambda) = \beta_0 + \beta_1X_1 + \beta_2X_2 + ... + \beta_nX_n$$
+
+The model assumptions are:
+
+- **Poisson outcome:** the outcome is a count per unit of time or space and follows a Poisson distribution;
+- **independence:** all observations are independent of one another; 
+- **the mean is equal to the variance:** simply, because by definition we know that the mean of a Poisson variable must be equal to its variance; and
+- **Linearity:** as in all linear models, of course, and specifically here the log of the mean rate $log(\lambda)$ must be a linear combination of $X$.
+
+
+#### 1.2 Poisson Regression in R
+
+We will the [Household Size in the Philippines](https://bookdown.org/roback/bookdown-BeyondMLR/ch-poissonreg.html) case study from this excellent book on applied regression models in R: [Beyond Multiple Linear Regression: Applied Generalized Linear Models and Multilevel Models in R, Paul Roback and Julie Legler](https://bookdown.org/roback/bookdown-BeyondMLR/).
+
+```{r echo = T, message = T, warning = F}
+fHH1 <- fread(paste0(getwd(), "/_data/fHH1.csv"))
+str(fHH1)
+```
+
+What we would like to do is to be able to predict the `total` variable, which represents the number of people living in a household (other than the head of the household), from the following covariates:
+
+- `location`: where the house is located (regions in the Philippines, whose The Philippine Statistics Authority (PSA) spearheads from the Family Income and Expenditure Survey (FIES) are the source of this dataset);
+- `age`: the age of the head of household;
+- `numLT5`: the number of people in the household under 5 years of age;
+- `roof`: the type of roof in the household (either Predominantly Light/Salvaged Material, or Predominantly Strong Material: stronger material can sometimes be used as a proxy for greater wealth).
+
+Let's take a look at the probability distribution of the outcome variable:
+
+```{r echo = T, message = F, warning = F}
+ggplot(data = fHH1, 
+       aes(x = total)) + 
+  geom_bar(stat = 'count',
+           colour = "black",
+           fill = "aliceblue",
+           alpha = .75,
+           ) + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+We have two integer and two categorical predictors. Let's have a look at them, categorical predictors first:
+
+```{r echo = T, message = F, warning = F}
+ggplot(data = fHH1, 
+       aes(x = location)) + 
+  geom_bar(stat = 'count',
+           colour = "black",
+           fill = "indianred",
+           alpha = .75,
+           ) + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+```{r echo = T, message = F, warning = F}
+as.data.frame(table(fHH1$roof))
+```
+
+Now the numbers:
+
+```{r echo = T, message = F, warning = F}
+ggplot(data = fHH1, 
+       aes(x = age)) + 
+  geom_bar(stat = 'count',
+           colour = "black",
+           fill = "green",
+           alpha = .75,
+           ) + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+```{r echo = T, message = F, warning = F}
+ggplot(data = fHH1, 
+       aes(x = numLT5)) + 
+  geom_bar(stat = 'count',
+           colour = "black",
+           fill = "green",
+           alpha = .75,
+           ) + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+We need to test the assumption that the outcome variable follows a Poisson distribution. While it is almost always very difficult to say what distribution does a variable follows in empirical problems, we can test the relationship between the outcome mean and variance: they should be equal, right?
+
+```{r echo = T, message = F, warning = F}
+meanVar <- fHH1 %>%
+  dplyr::select(age, total) %>% 
+  dplyr::mutate(ints = cut(age, breaks = 15)) %>% 
+  dplyr::group_by(ints) %>% 
+  dplyr::summarise(mean = mean(total),
+                   var = var(total),
+                   n = n())
+ggplot(meanVar, 
+       aes(x = mean, y = var)) + 
+  geom_smooth(method = "lm", size = .25) + 
+  geom_point(size = 2) +
+  geom_point(size = 1.5, color = "white") +
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+What I really did is to `cut()` - a handy {dplyr} function indeed! - the `age` variable in 15 intervals and plot mean against the variance of the values of the outcome in the age intervals that I have obtained.
+
+Another trick that we can pool is to perform a **non-parametric bootstrap** and see if the obtained means and variances are correlated:
+
+```{r echo = T, message = F, warning = F}
+outcome <- data.frame(total = fHH1$total)
+meanVar <- lapply(1:1000, function(x) {
+  s <- sample_n(outcome,
+                size = dim(outcome)[1],
+                replace = TRUE)
+  return(
+    data.frame(mean = mean(s$total), 
+               var = var(s$total))
+  )
+})
+meanVar <- rbindlist(meanVar)
+ggplot(meanVar, 
+       aes(x = mean, y = var)) + 
+  geom_smooth(method = "lm", size = .25) + 
+  geom_point(size = 2) +
+  geom_point(size = 1.5, color = "white") +
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+What this exercise shows is that the mean and the variance of `total` seem to be correlated to a degree, but carefully observe how variances exceed the respective bootstrap sample means.
+
+Now, the Poisson regression model:
+
+```{r echo = T, message = F, warning = F}
+poiss_model = glm(total ~ age,
+                 family = "poisson",
+                 data = fHH1)
+summary(poiss_model)
+```
+
+The obtain the model coefficients (with Exponentiation, of course - remember the $log(\lambda_i)$ transform of the outcome in the model): 
+
+```{r echo = T, message = F, warning = F}
+exp(coef(poiss_model))
+```
+The model log-likelihood and the Akaike Information Criterion (AIC) are:
+
+```{r echo = T, message = F, warning = F}
+logLik(poiss_model)
+```
+
+```{r echo = T, message = F, warning = F}
+poiss_model$aic
+```
+And the confidence intervals for model coefficients are again obtained from `confint()`:
+
+```{r echo = T, message = F, warning = F}
+confint(poiss_model)
+```
+
+Now the full model:
+
+```{r echo = T, message = F, warning = F}
+poiss_model_full = glm(total ~ location + age + numLT5 + roof,
+                      family = "poisson",
+                      data = fHH1)
+summary(poiss_model_full)
+```
+
+And let's take a look at the full model coefficients:
+
+```{r echo = T, message = F, warning = F}
+exp(coef(poiss_model_full))
+```
+Compare the AICs of the model encompassing `age` only and the full model:
+
+```{r echo = T, message = F, warning = F}
+poiss_model_full$aic
+```
+
+```{r echo = T, message = F, warning = F}
+poiss_model$aic
+```
+And we can see that the full model performs somewhat better, as (maybe) expected.
+
+### 2. Overdispersion and the Negative Binomial Regression
+
+Remember how we have discovered that variances in `total` - the outcome for the model in the `fHH1` dataset - seems to be larger than its variance? 
+
+> Overdispersion describes the observation that variation is higher than would be expected. Some distributions do not have a parameter to fit variability of the observation. For example, the normal distribution does that through the parameter $\sigma$ (i.e. the standard deviation of the model), which is constant in a typical regression. In contrast, the Poisson distribution has no such parameter, and in fact the variance increases with the mean (i.e. the variance and the mean have the same value). In this latter case, for an expected value of $E(y)= 5$, we also expect that the variance of observed data points is $5$. But what if it is not? What if the observed variance is much higher, i.e. if the data are overdispersed? Source: [Introduction: what is overdispersion? From: Advice for Problems in Environmental Statistics (APES) of the Department of Biometry and Environmental System Analysis at the University of Freiburg, and the Professorship for Theoretical Ecology at the University of Regensburg](http://biometry.github.io/APES//LectureNotes/2016-JAGS/Overdispersion/OverdispersionJAGS.html)
+
+One way to test whether overdispersion is present is to compute the **dispersion parameter**. It is obtained by dividing the model deviance with the respective number of degrees of freedom (which is $n-p$ in this case, $n$ being the number of observations and $p$ the number of parameters). If no overdispersion is present the value of the dispersion parameter should be close to 1. Let's see:
+
+```{r echo = T, message = F, warning = F}
+deviance <- poiss_model_full$deviance
+n <- dim(fHH1)[1]
+p <- length(poiss_model_full$coefficients) 
+df = n - p
+dispersionParameter <- deviance/df
+print(dispersionParameter)
+```
+Ok, and what do we do then? We need a model less constrained than the Poisson regression!
+
+> For example, Poisson regression analysis is commonly used to model count data. If overdispersion is a feature, an alternative model with additional free parameters may provide a better fit. In the case of count data, a Poisson mixture model like the negative binomial distribution can be proposed instead, in which the mean of the Poisson distribution can itself be thought of as a random variable drawn – in this case – from the gamma distribution thereby introducing an additional free parameter (note the resulting negative binomial distribution is completely characterized by two parameters). Source: [Overdispersion, From Wikipedia, the free encyclopedia
+](https://en.wikipedia.org/wiki/Overdispersion)
+
+In **Negative Binomial Regression* we generate a value of $\lambda$ for each observation from a [Gamma distribution](https://en.wikipedia.org/wiki/Gamma_distribution) and then generate a count using a Poisson distribution with the generated value of $\lambda$. Mathematically, with this process we arrive at the *Gamma-Poisson mixture* which is described by a [Negative Binomial Distribution](https://en.wikipedia.org/wiki/Negative_binomial_distribution) which has two parameters (one more than the simpler Poisson). Because we introduce that one more parameter the situation is way more flexible and the counts can be more dispersed than it would be expected for observations based on a Poisson with rate $\lambda$ alone.
+
+```{r echo = T, message = F, warning = F}
+library(MASS)
+nb_model <- glm.nb(total ~ location + age + numLT5 + roof,
+                   data = fHH1)
+summary(nb_model)
+```
+
+**N.B.** Lower value of $\theta$ implies larger overdispersion.
+
+### 3. Cross-Validation
+
+When we decide to derive a model of some phenomenon in mathematical statistics what we typically do is to draw a sample of relevant observations and predictors and the train the model on the sampled data. As we have seen in the course of our previous sessions, the question of **generalization** is of crucial importance. We are not looking for models with significant coefficients and high **goodnes-of-fit (GoF)** measures (such as $R^2$, for example) or low **badness-of-fit** measures (such as $AIC$), but for models that will guarantee to generalize beyond the data that we have used to train them. Thus, we are very much interested in the standard errors of the model coefficients: they let us know how widely would they vary if we were to sample the data over and over again from the respective population.
+
+There is one serious problem to face here. Since we have one sample of data at our disposal, we can easily imagine how all following samples would vary in respect to it. Since all samples come from the same population we can safely assume that some order, some structure, some invariant information will be present in all of them. However, we also know that each sample will be *idiosyncratic* up to some level. And we manage to fit a great model to the sample of data only we will be probably start to explain that idiosyncratic aspect of the sample too: a part of information contained in the data that is a consequence of the sampling procedure and not in any way a general pattern present in the population and thus probably not present in each or a majority of all other samples that we could have drawn from it. This problem is called **overfitting** and needs to be handled very carefully in Data Science.
+
+**Cross-validation (CV)** is one method to deal with the possibility of overfitting. In all forms of CV the idea is basically the same: train (i.e. estimate) the model on a subset (or subsets) of data and test the model on the remaining "unseen" part (or parts) of it. We will introduce two basic CV approaches here: the **Leave-Out-One-CV** and the **K-fold CV**.
+
+#### 3.1 LOOCV
+
+I will use `iris` to demonstrate the LOOCV procedure. We want to compare two models of `Sepal.Width`:
+
+- first we predict the outcome from `Sepal.Length` and `Petal.Length` only, and then
+- we predict the outcome from `Sepal.Length`, `Petal.Length`, and `Petal.Width`.
+
+The LOOCV procedure is used when the dataset is really small - which `iris` definitely is.
+
+Here is the LOOCV approach:
+
+- remove one single observation from the dataset;
+- estimate the model from the remaining data;
+- predict the observation that was left out;
+- compute the *squared prediction error* (`data point - prediction)^2`);
+- compute the *mean squared prediction error (MSPE)* following the removal/fit/predict step for each data point.
+
+The selected model would be the one with the lower mean prediction error, of course. R:
+
+```{r echo = T, message = F, warning = F}
+head(iris)
+```
+
+Compute the MSPE for the simpler model first:
+
+```{r echo = T, message = F, warning = F}
+dataSet <- dplyr::select(iris, 
+                         Sepal.Length, Petal.Length, Sepal.Width)
+mspe1 <- sapply(1:dim(dataSet)[1], function(x) {
+  fitData <- dataSet[-x, ]
+  leftOut <- dataSet[x, ]
+  model <- lm(Sepal.Width ~ Sepal.Length + Petal.Length, 
+              data = fitData)
+  prediction <- predict(model, 
+                        newdata = leftOut[, c('Sepal.Length', 'Petal.Length')])
+  spe <- (leftOut$Sepal.Width - prediction)^2
+})
+print(mean(mspe1))
+```
+
+And now compute the MSPE for the model encompassing the additional predictor:
+
+```{r echo = T, message = F, warning = F}
+dataSet <- dplyr::select(iris, 
+                         Sepal.Length, Petal.Length, Petal.Width, Sepal.Width)
+mspe2 <- sapply(1:dim(dataSet)[1], function(x) {
+  fitData <- dataSet[-x, ]
+  leftOut <- dataSet[x, ]
+  model <- lm(Sepal.Width ~ Sepal.Length + Petal.Length + Petal.Width, 
+              data = fitData)
+  prediction <- predict(model, 
+                        newdata = leftOut[, c('Sepal.Length', 'Petal.Length', 'Petal.Width')])
+  spe <- (leftOut$Sepal.Width - prediction)^2
+})
+print(mean(mspe2))
+```
+
+#### 3.2 K-Fold CV
+
+In K-fold CV we randomly place all available observations in K *folds* (i.e. groups). If we decide to go for three groups, for example, we proceed in the following way:
+
+- randomly assign the observations into the three groups A, B, and C;
+- fit the model on A+B data and predict the outcome from the left out group C, then compute the MSPE;
+- fit the model on A+C data and predict the outcome from the left out group B, then compute the MSPE;
+- fit the model on C+B data and predict the outcome from the left out group A, then compute the MSPE;
+- compute the mean of the MSPEs from the previous steps; finally,
+- select the model with the lowest mean prediction error.
+
+For the simpler `Sepal.Width ~ Sepal.Length + Petal.Length` model first:
+
+```{r echo = T, message = F, warning = F}
+iris$Species <- NULL
+iris$fold <- sample(1:3, 150, replace = TRUE)
+table(iris$fold)
+```
+**N.B.** The folds should be of approximately the same size at least. I could have opted for 50/50/50 as well. However:
+
+```{r echo = T, message = F, warning = F}
+dataSet <- dplyr::select(iris, 
+                         Sepal.Length, Petal.Length, Sepal.Width, fold)
+mspe1 <- sapply(1:3, function(x) {
+  fitData <- dataSet[dataSet$fold != x, ]
+  leftOut <- dataSet[dataSet$fold == x, ]
+  model <- lm(Sepal.Width ~ Sepal.Length + Petal.Length, 
+              data = fitData)
+  prediction <- predict(model, 
+                        newdata = leftOut[, c('Sepal.Length', 'Petal.Length')])
+  spe <- mean((leftOut$Sepal.Width - prediction)^2)
+})
+print(mspe1)
+```
+And the mean of MSPEs for the simpler model is:
+
+```{r echo = T, message = F, warning = F}
+print(mean(mspe1))
+```
+Now for the model encompassing `Petal.Width` too:
+
+```{r echo = T, message = F, warning = F}
+dataSet <- dplyr::select(iris, 
+                         Sepal.Length, Petal.Length, Petal.Width, Sepal.Width, fold)
+mspe2 <- sapply(1:3, function(x) {
+  fitData <- dataSet[dataSet$fold != x, ]
+  leftOut <- dataSet[dataSet$fold == x, ]
+  model <- lm(Sepal.Width ~ Sepal.Length + Petal.Length + Petal.Width, 
+              data = fitData)
+  prediction <- predict(model, 
+                        newdata = leftOut[, c('Sepal.Length', 'Petal.Length', 'Petal.Width')])
+  spe <- mean((leftOut$Sepal.Width - prediction)^2)
+})
+print(mspe2)
+```
+
+And the mean MSPE from three folds is:
+
+```{r echo = T, message = F, warning = F}
+print(mean(mspe2))
+```
+**N.B.** Cross-validation procedures do not have to be based on MSPE. Other criteria like AIC or log-likelihood are used as well. For classification problems, the ROC analysis for each prediction can be used to select the best available model.
+
+
+***
+
+### Further Readings
+
++ [Beyond Multiple Linear Regression: Applied Generalized Linear Models and Multilevel Models in R, Paul Roback and Julie Legler, January 26, 2021, Chapter 4 Poisson Regression](https://bookdown.org/roback/bookdown-BeyondMLR/ch-poissonreg.html)
+
++ [Improve Your Model Performance using Cross Validation (in Python and R) from Analytics Vidhya](https://www.analyticsvidhya.com/blog/2018/05/improve-model-performance-cross-validation-in-python-r)
+
+
+### R Markdown
+
++ [R Markdown](https://rmarkdown.rstudio.com/) is what I have used to produce this beautiful Notebook. We will learn more about it near the end of the course, but if you already feel ready to dive deep, here's a book: [R Markdown: The Definitive Guide, Yihui Xie, J. J. Allaire, Garrett Grolemunds.](https://bookdown.org/yihui/rmarkdown/) 
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+

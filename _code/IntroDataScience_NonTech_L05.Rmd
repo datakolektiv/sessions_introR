@@ -1,0 +1,289 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Lab05
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Lab 05: {httr}, REST API calls, JSON, and ggplot2 in action
+ 
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### What do we want to do today?
+
+We want to practice REST API access from R, a topic covered in Session 04. In the following example we will access a free REST API from within our R environment, collect the API response as [JSON](https://www.json.org/json-en.html), convert it to an R list, and play with the data.
+
+### 1. Setup the basic API access parameters
+
+In this example we will rely on the free [https://datausa.io/](https://datausa.io/) API to obtain statistical data. Here is the intro to their API: [datausa.io API](https://datausa.io/about/api/).
+
+- You will find the API base endpoint there:
+
+```{r echo = T}
+baseEndPoint <- "https://datausa.io/api/data"
+```
+
+### 2. Make a simple API call
+
+We will use [{httr}](https://cran.r-project.org/web/packages/httr/vignettes/quickstart.html) to get in touch with the API. It is a part of [{tidyverse}](https://www.tidyverse.org/).
+
+```{r echo = T}
+library(httr)
+```
+
+**Step 1. Define API parameters.**
+
+First we define the API parameters.
+
+```{r echo = T}
+### --- compose API call
+# - use base API endpoint
+# - and concatenate with API parameters
+# - from the following example: https://datausa.io/about/api/
+# - parameter: drilldowns
+drilldowns <- paste0("drilldowns=", "Nation")
+# - parameter: measures
+measures <- paste0("measures=", "Population")
+# - parameters:
+params <- paste("&", c(drilldowns, measures),
+                sep = "", collapse = "")
+cat(params)
+```
+
+**Step 2. Compose API call.**
+
+We put together the `baseEndPoint` with the API call parameters:
+
+```{r echo = T}
+api_call <- paste0(baseEndPoint, "?", params)
+cat(api_call)
+```
+
+**Step 3. Make API call.**
+
+We use `httr::GET()` to contact the API, ask for data, and fetch the result:
+
+```{r echo = T}
+response <- GET(URLencode(api_call))
+class(response)
+```
+
+The `URLencode(api_call)` call to the base R `URLencode()` function will take care of [Percent-encoding](https://en.wikipedia.org/wiki/Percent-encoding) where and if necessary. Hint: always use `URLencode(your_api_call)`.
+
+We can see that `response` is now of a `response` class. It is pretty structured and rich indeed:
+
+```{r echo = T}
+str(response)
+```
+
+You need to check one thing: the server status response.
+
+```{r echo = T}
+response$status_code
+```
+
+`200` means that your request was processed successfully. Introduce yourself to server status responses and learn a bit about them from the following source: [HTTP response status codes](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status).
+
+The results is found in `response$content`, but...
+
+```{r echo = T}
+class(response$content)
+```
+
+What is `raw`? It means that your data were obtained as *raw binary data* and they need to be decoded into an R `character` class representation. It is easy:
+
+```{r echo = T}
+resp <- rawToChar(response$content)
+class(resp)
+```
+
+Is `resp` lengthy?
+
+```{r echo = T}
+nchar(resp)
+```
+
+```{r echo = T}
+cat(resp)
+```
+Now we can see that the API response is JSON indeed. To work with JSON in R, we need to convert it into some R known data structures. For example a list.
+
+**Step 4. Convert JSON data to an R list.**
+
+We will use [jsonlite](https://cran.r-project.org/web/packages/jsonlite/index.html), also a part of {tidyverse}, to convert from JSON to an R list:
+
+```{r echo = T}
+library(jsonlite)
+resp_list <- fromJSON(resp)
+str(resp_list)
+```
+
+**Step 5. Inspect the result and play with the data.**
+
+What is the length of `resp_list`?
+
+```{r echo = T}
+length(resp_list)
+```
+
+Let's discover what is inside:
+
+```{r echo = T}
+class(resp_list$data)
+```
+
+How does the `resp_list$data` data.frame look like?
+
+```{r echo = T}
+head(resp_list$data)
+```
+Oh, nice! Let's plot the time series of the US population over years then:
+
+```{r echo = T}
+library(ggplot2)
+library(ggrepel)
+ggplot(data = resp_list$data, 
+       aes(x = Year,
+           y = Population, 
+           label = Population)) + 
+  geom_path(size = .25, color = "blue", group = 1) + 
+  geom_point(size = 2, color = "blue") + 
+  geom_label_repel(size = 3) + 
+  ggtitle("US Population") +
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(plot.title = element_text(hjust = .5))
+```
+
+What is the second element of `resp_list`?
+
+```{r echo = T}
+class(resp_list$source)
+```
+
+Let's see what is in:
+
+```{r echo = T}
+head(resp_list$source)
+```
+Oh, no: there is a nested data.frame in `resp_list$source`; we do not like such things in R but that happens too often when we work with API responses. There is a nice function to take care about such occurrences: `jsonlite::flatten()`:
+
+```{r echo = T}
+source <- flatten(resp_list$source, recursive = TRUE)
+colnames(source)
+```
+
+I understand now: `resp_list$source` are the *metadata*! The API informed us about the sources of the data that it delivered:
+
+```{r echo = T}
+source$measures
+```
+
+And then:
+
+```{r echo = T}
+source$annotations.source_description
+```
+
+Awesome: we get the data and the documentation for it!
+
+### 3. Make another API call and inspect the data
+
+For each API that you want to use you will need to read its documentation and learn about the parameters that you may pass to it. 
+
+I have stripped this API call from [https://datausa.io/profile/soc/education-legal-community-service-arts-media-occupations](https://datausa.io/profile/soc/education-legal-community-service-arts-media-occupations): just click on **View data** in the top-right corner.
+
+You can copy and paste [the entire API call](https://datausa.io/api/data?measure=Average%20Wage,Average%20Wage%20Appx MOE,Record Count&drilldowns=Minor Occupation Group&Workforce Status=true&Record Count>=5) into your browsers navigation bar to obtain the JSON response directly.
+
+The data are on education, legal, community service, arts, & media occupations in the USA.
+
+Make a call and check the server response status:
+
+```{r echo = T}
+api_call <- paste0(baseEndPoint, 
+                   "?", 
+                   paste("PUMS Occupation=210000-270000", 
+                         "measure=Total Population,Total Population MOE Appx,Record Count",
+                         "drilldowns=Wage Bin",
+                         "Workforce Status=true",
+                         "Record Count>=5", 
+                         sep = "&"))
+response <- GET(URLencode(api_call))
+response$status
+```
+
+Convert the response to JSON and than to list and a data.frame:
+
+```{r echo = T}
+response <- rawToChar(response$content)
+response <- fromJSON(response)
+data <- response$data
+head(data)
+```
+Visualize with {ggplot2}:
+
+```{r echo = T, fig.height=18}
+data$`Wage Bin` <- factor(data$`Wage Bin`, 
+                          levels = unique(data$`Wage Bin`))
+ggplot(data = data, 
+       aes(x = Year,
+           y = log(`Total Population`), 
+           color = `Wage Bin`,
+           fill = `Wage Bin`)) + 
+  geom_path(size = 1.5, group = 1) + 
+  geom_point(size = 13) + 
+  facet_wrap(~`Wage Bin`, ncol = 3) +
+  ggtitle("US: Education, legal, community service, arts, & media occupations") +
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(plot.title = element_text(hjust = .5, size = 70)) + 
+  theme(axis.text.x = element_text(angle = 90, size = 40)) +
+  theme(axis.title.x = element_text(size = 50)) + 
+  theme(axis.text.y = element_text(size = 40)) +
+  theme(axis.title.y = element_text(size = 50)) + 
+  theme(legend.text = element_text(size = 50)) +
+  theme(legend.title = element_text(size = 50)) +
+  theme(strip.text = element_text(size = 45)) +
+  theme(strip.background = element_blank()) +
+  theme(legend.position = "top")
+```
+
+### R Markdown
+
+[R Markdown](https://rmarkdown.rstudio.com/) is what I have used to produce this beautiful Notebook. We will learn more about it near the end of the course, but if you already feel ready to dive deep, here's a book: [R Markdown: The Definitive Guide, Yihui Xie, J. J. Allaire, Garrett Grolemunds.](https://bookdown.org/yihui/rmarkdown/) 
+
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+

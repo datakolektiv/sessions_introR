@@ -1,0 +1,190 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Lab03
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Lab 03: Numerical Simulations: Simple Linear Regression
+ 
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### What do we want to do today?
+
+We will simulate correlated variables and perform tons of linear regressions to inspect the distributions of linear coefficients and understand what is the standard error of the coefficient in linear regression. 
+
+### 0. Setup
+
+```{r echo = T, message = F, warning = F}
+library(tidyverse)
+library(data.table)
+library(MASS)
+set.seed(9988)
+```
+
+### 1. Simulate correlated variables from a Multivariate Normal Distribution
+
+Random draws from the [Multivariate Normal Distribution](https://en.wikipedia.org/wiki/Multivariate_normal_distribution) in R can be performed with `MASS:mvrnorm()`. In the following chunk, `meansVector` defines a vector of the two variables' means, and `covMat` is their variance-covariance matrix:
+
+```{r echo = T}
+meansVector <- c(15, 25)
+print(meansVector)
+```
+
+```{r echo = T}
+covMat <- matrix(
+  c(0.6856935, 
+    1.274315, 
+    1.2743154, 
+    3.116278),
+  nrow = 2
+  )
+print(covMat)
+```
+The covariance between the two variables is set to be `1.274315`.
+Let's take a sample of size `150` from the Multivariate Normal Distribution defined from `meansVector` and `covMat`: 
+
+```{r echo = T}
+mvn_sample <- as.data.frame(mvrnorm(n = 150,
+                                    mu = meansVector,
+                                    Sigma = covMat
+                                    )
+)
+head(mvn_sample)
+```
+
+What is the observed correlation?
+
+```{r echo = T}
+cor(mvn_sample$V1, 
+    mvn_sample$V2)
+```
+**NOTE.** We understand that `meansVector` and `covMat` are **population parameters**.
+
+Linear regression: predict `mvn_sample$V2` from `mvn_sample$V1`:
+
+```{r echo = T}
+reg_model <- lm(V2 ~ V1,
+                data = mvn_sample) 
+summary(reg_model)
+```
+The coefficients are:
+
+```{r echo = T}
+summary_reg_model <- summary(reg_model)
+summary_reg_model$coefficients
+```
+So the intercept is found at `-3.180016` with a standard error of `1.30138920` while the estimate of the slope is `1.883055` with a standard error of `0.08629802`; the respective t-tests against zero and the Type I Error probabilities are also reported.
+
+Next we simulate 10,000 samples from the population parameters and each time perform a linear regression, recording the values of the parameter estimates:
+
+```{r echo = T}
+mvn_samples <- function(meansVector, covMat) {
+  sample <- mvrnorm(n = 150,
+                    mu = meansVector,
+                    Sigma = covMat)
+  return(as.data.frame(sample))
+}
+```
+
+```{r echo = T}
+lmSimulations <- lapply(1:10000, function(x) {
+  newData <- mvn_samples(meansVector, covMat)
+  model <- lm(V2 ~ V1, 
+              data = newData)
+  return(data.frame(intercept = coefficients(model)[1], 
+                    slope = coefficients(model)[2]))
+})
+lmSimulations <- rbindlist(lmSimulations)
+head(lmSimulations)
+```
+
+The distribution of the intercept estimates:
+
+```{r echo = T}
+ggplot(lmSimulations, 
+       aes(x = intercept)) + 
+  geom_density(alpha = .15, color = "black") + 
+  ggtitle("Distrubution of Model Intercept") + 
+  xlab('Intercept') + 
+  ylab('Density') + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) +
+  theme(plot.title = element_text(hjust = .5))
+```
+The estimated intercept from the first regression was found at `-3.180016`: no wonder the mean of this distribution falls close to three then, right?
+
+```{r echo = T}
+mean(lmSimulations$intercept)
+```
+The distribution of the slope estimates:
+
+```{r echo = T}
+ggplot(lmSimulations, 
+       aes(x = slope)) + 
+  geom_density(alpha = .15, color = "black") + 
+  ggtitle("Distrubution of Model Slope") + 
+  xlab('Slope') + 
+  ylab('Density') + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) +
+  theme(plot.title = element_text(hjust = .5))
+```
+
+```{r echo = T}
+mean(lmSimulations$slope)
+```
+... while the initial regression estimated a slope of `1.883055`!
+
+And what about the standard errors? Initially, their values were `1.30138920` for the intercept and `0.08629802` for the slope.
+Let's see:
+
+```{r echo = T}
+sd(lmSimulations$intercept)
+```
+
+```{r echo = T}
+sd(lmSimulations$slope)
+```
+Do you trust the Simple Linear Regression Model now? : )
+**Note.** If you wonder why the `mean(lmSimulation$intercept)` is `-2.863263` while in the initial regression it was estimated to be `-3.180016`: **look at the standard errors of the model coefficients both in the initial regression, and their means obtained from numerical simulations**. 
+
+### R Markdown
+
+[R Markdown](https://rmarkdown.rstudio.com/) is what I have used to produce this beautiful Notebook. We will learn more about it near the end of the course, but if you already feel ready to dive deep, here's a book: [R Markdown: The Definitive Guide, Yihui Xie, J. J. Allaire, Garrett Grolemunds.](https://bookdown.org/yihui/rmarkdown/) 
+
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+

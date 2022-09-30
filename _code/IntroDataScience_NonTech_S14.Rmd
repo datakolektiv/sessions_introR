@@ -1,0 +1,509 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Session14
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Session 14: Introduction to Estimation Theory. Multiple Linear Regression. Model diganostics. The role of part correlation in this model. Dummy coding of categorical variables in R. Nested models.
+
+
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### What do we want to do today?
+
+In today's session we need to go beyond the discussion of a simple relationship between two variables: one *predictor* and one *criterion*. While Simple Linear Regression is extremely useful in a didactic perspective - to introduce statistical learning methods as such - is is only seldom used in practice. The real world is complex way beyond exploring only simple relationships, and mathematical models in practice almost necessarily deal with *many predictors* and the existing mutual information among them in an attempt to predict the state of the outcome variable. We will introduce the Multiple Linear Regression model in this session and discuss a more complex scenario involving several predictors. We will also introduce the method of *dummy coding* when categorical predictors are present in the Multiple Linear Regression scenario. We are also laying ground for even more complex *Generalized Linear Models* that can handle categorization problems beyond regression. Finally: comparing nested regression models.
+
+### 0. Prerequisits
+
+Install:
+
+```{r echo = T, eval = F}
+install.packages('QuantPsyc')
+install.packages('lattice')
+```
+
+Setup:
+
+```{r echo = T, message = F, warning = F}
+dataDir <- paste0(getwd(), "/_data/")
+library(tidyverse)
+library(Hmisc)
+library(ppcor)
+library(car)
+library(datasets)
+library(broom)
+library(QuantPsyc)
+library(lattice)
+```
+
+
+### 1. Multiple Linear Regression: the exposition of the problem
+
+#### 1.1 Iris, again
+
+The `iris' dataset again offers everything that we need to introduce a new statistical model. One might wonder, but that small and (manifestly!) simple dataset can be used as well to introduce even more complex statistical models than Multiple Linear Regression!
+
+``` {r echo = T, message = F}
+data(iris)
+str(iris)
+```
+
+And back to the problem with `Petal.Length ~ Sepal.Length` regression that we have already discussed:
+
+``` {r echo = T, message = F}
+ggplot(data = iris,
+       aes(x = Sepal.Length, 
+           y = Petal.Length)) +
+  geom_point(size = 2, colour = "blue") +
+  geom_smooth(method='lm', size = .25) +
+  ggtitle("Sepal Length vs Petal Length") +
+  xlab("Sepal Length") + ylab("Petal Length") + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(plot.title = element_text(hjust = .5))
+```
+... where everything *looks* nice until...
+
+```{r echo = T, message = F}
+ggplot(data = iris,
+       aes(x = Sepal.Length, 
+           y = Petal.Length, 
+           color = Species, 
+           group = Species)) +
+  geom_point(size = 2) +
+  geom_smooth(method='lm', size = .25) +
+  ggtitle("Sepal Length vs Petal Length") +
+  xlab("Sepal Length") + ylab("Petal Length") + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(plot.title = element_text(hjust = .5))
+```
+Not to mention the model assumptions that we have discussed in the previous Session. 
+
+Let's study the problem a bit.
+
+```{r echo = T, message = F}
+plot(iris[ , c(1,3,5)],
+     main = 
+       "Inspect: Sepal vs. Petal Length \nfollowing the discovery of the Species...",
+     cex.main = .75,
+     cex = .6)
+```
+Did we ever mention `{lattice}`, the hero of data visualization in R before `{ggplot2}`? 
+
+```{r echo = T, message = F}
+# - {latice} xyplot
+xyplot(Petal.Length ~ Sepal.Length | Species,
+       data = iris,
+       xlab = "Sepal Length", 
+       ylab = "Petal Length"
+)
+```
+Consider the *conditional densities* of `Petal.Length` given `Species` (using `{lattice}` again):
+
+```{r echo = T, message = F}
+# - {latice} densityplot
+densityplot(~ Petal.Length | Species,
+            data = iris,
+            plot.points = FALSE,
+            xlab = "Petal Length", 
+            ylab = "Density",
+            main = "P(Petal Length|Species)",
+            col.line = 'red'
+)
+```
+And now consider the *conditional densities* of `Sepal.Length` given `Species`:
+
+```{r echo = T, message = F}
+# - {latice} densityplot
+densityplot(~ Sepal.Length | Species,
+            data = iris,
+            plot.points=FALSE,
+            xlab = "Sepal Length", ylab = "Density",
+            main = "P(Sepal Length|Species)",
+            col.line = 'blue'
+)
+```
+I have and idea: why not run a series of separate Simple Linear Regressions in the subgroups defined by `Species` and inspect the results? Let's do it:
+
+```{r echo = T, message = F}
+# - setosa
+species <- unique(iris$Species)
+w1 <- which(iris$Species == species[1])
+reg <- lm(Petal.Length ~ Sepal.Length, 
+          data = iris[w1,]) 
+tidy(reg)
+```
+
+```{r echo = T, message = F}
+# - versicolor
+w2 <- which(iris$Species == species[2])
+reg <- lm(Petal.Length ~ Sepal.Length, data = iris[w2,]) 
+tidy(reg)
+```
+
+```{r echo = T, message = F}
+# - virginica
+w3 <- which(iris$Species == species[3])
+reg <- lm(Petal.Length ~ Sepal.Length, data = iris[w3,]) 
+tidy(reg)
+```
+
+I have used `broom::tidy` to tidy up the model summaries. The [{broom}](https://cran.r-project.org/web/packages/broom/vignettes/broom.html) package offers many useful functions to deal with potentially messy outputs of R's modeling functions such as `lm()`. 
+
+So, `Species` obviously has some effect on `Petal.Length`, and that effect possibly goes even beyond the effect of `Sepal.Length`. How do we incorporate another predictor into the regression model?
+
+
+#### 1.2 The predictor is categorical: Dummy Coding
+
+We will now try to predict `Petal.Length` from `Species` alone in a Simple Linear Regression model. First:
+
+```{r echo = T}
+is.factor(iris$Species)
+```
+Ok, and the levels?
+
+```{r echo = T}
+levels(iris$Species)
+```
+Regression with *one categorical predictor*:
+
+```{r echo = T}
+reg <- lm(Petal.Length ~ Species, 
+          data = iris) 
+tidy(reg)
+```
+
+What effects are present? Let's see: `Speciesversicolor`, `Speciesvirginica`, ok, but what happened to `Speciessetosa`..? It is our **baseline**, see:
+
+```{r echo = T}
+levels(iris$Species)
+```
+The `broom::glance()` function is similar to `summary()` but gives us the model overview all tidy:
+
+```{r echo = T}
+broom::glance(reg)
+```
+
+Never forget what the regression coefficient of a **dummy variable** means: *it tells us about the effect of moving from the baseline towards the respective reference level*. Here: `baseline = setosa` (cmp. `levels(iris$Species)` vs. the output of `tidy(reg)`). **Hence:** always look after the order of levels in linear models!
+
+For example, we can change the baseline in `Species` to `versicolor`:
+
+```{r echo = T}
+# - Levels: setosa versicolor virginica
+levels(iris$Species)
+```
+
+```{r echo = T}
+iris$Species <- factor(iris$Species, 
+                       levels = c("versicolor", 
+                                  "virginica",
+                                  "setosa")
+                       )
+levels(iris$Species)
+```
+Regression again:
+
+```{r echo = T}
+# - baseline is now: versicolor
+reg <- lm(Petal.Length ~ Species, 
+          data = iris) 
+tidy(reg)
+```
+
+#### 1.3 Understanding dummy coding
+
+Here is another way to perform dummy coding of categorical variables in R:
+
+```{r echo = T}
+# - ...just to fix the order of Species back to default
+rm(iris); data(iris)
+levels(iris$Species)
+```
+In order to understand what dummy coding really is:
+
+```{r echo = T}
+contr.treatment(3, base = 1)
+```
+
+And then specifically applied to `iris$Species`:
+
+```{r echo = T}
+contrasts(iris$Species) <- contr.treatment(3, base = 1)
+contrasts(iris$Species)
+```
+Do not forget that:
+
+```{r echo = T}
+class(iris$Species)
+```
+Now let's play with level ordering:
+
+```{r echo = T}
+iris$Species <- factor(iris$Species, 
+                       levels = c ("virginica", 
+                                   "versicolor", 
+                                   "setosa"))
+levels(iris$Species)
+```
+
+```{r echo = T}
+contrasts(iris$Species) = contr.treatment(3, base = 1)
+# - baseline is now: virginica
+contrasts(iris$Species)
+# - consider carefully what you need to do
+```
+
+```{r echo = T}
+levels(iris$Species)
+```
+### 2. Multiple Linear Regression: the problem solved
+
+#### 2.1 One categorical + one continuous predictor
+
+Now we run a multiple linear regression model with `Sepal.Length` and `Species` (dummy coded) as predictors of `Petal.Length`:
+
+```{r echo = T}
+# - Petal.Length ~ Species (Dummy Coding) + Sepal.Length 
+rm(iris); data(iris) # ...just to fix the order of Species back to default
+reg <- lm(Petal.Length ~ Species + Sepal.Length, 
+          data = iris)
+tidy(reg)
+```
+
+```{r echo = T}
+glance(reg)
+```
+
+**N.B.** Since is.factor `(iris$Species) == T` - R does the dummy coding in lm() internally for us!
+
+Let's now compare these results with the simple linear regression model:
+
+```{r echo = T}
+reg <- lm(Petal.Length ~ Sepal.Length, data=iris) 
+tidy(reg)
+```
+
+```{r echo = T}
+glance(reg)
+```
+
+#### 2.2 Nested models
+
+We will now specify two regression models: `reg1` defined as `Petal.Length ~ Sepal.Length` and `reg2` defined as `Petal.Length ~ Species + Sepal.Length`. Obviously, `reg2` encompasses `reg1` in some way, right? Of course: the predictors in one model are a subset of predictors in another. Such models are called *nested models*. In this terminological game, `reg2` would also be called a **full model**: a terminology will be used quite often in Binary Logistic Regression, the first Generalized Linear Model that we will meet in our next session.
+
+**Note on nested models:** There is always a set of coefficients for the nested model (e.g. `reg1`) such that it can be expressed in terms of the full model (`reg2`). Can you figure it out?
+
+```{r echo = T}
+# - reg1 is nested under reg2
+reg1 <- lm(Petal.Length ~ Sepal.Length, 
+           data = iris)
+reg2 <- lm(Petal.Length ~ Species + Sepal.Length, 
+           data = iris)
+```
+
+We can use the [partial F-test](http://pages.stern.nyu.edu/~gsimon/B902301Page/CLASS02_24FEB10/PartialFtest.pdf) to compare nested models:
+
+```{r echo = T}
+anova(reg1, reg2) # partial F-test; Species certainly has an effect beyond Sepal.Length
+```
+
+#### 2.3 Model diagnostics
+
+We can use the same kind of Influence Plot to search for influential cases in Multiple Linear Regression as we did in the case of Simple Linear Regression (except for this time the computation of the relevant indicators is way more complicated):
+
+```{r echo = T}
+infReg <- as.data.frame(influence.measures(reg)$infmat)
+head(infReg)
+```
+
+This time we will use `broom:augment()` to obtain the influence measures:
+
+```{r echo = T}
+regFrame <- broom::augment(reg2)
+head(regFrame)
+```
+
+Produce the Influence Chart:
+
+```{r echo = T}
+plotFrame <- data.frame(residual = regFrame$.std.resid,
+                        leverage = regFrame$.hat,
+                        cookD = regFrame$.cooksd)
+ggplot(plotFrame,
+       aes(y = residual,
+           x = leverage)) +
+  geom_point(size = plotFrame$cookD * 100, 
+             shape = 1, color = "blue") +
+  ylab("Standardized Residual") + 
+  xlab("Leverage") +
+  ggtitle("Influence Plot\nSize of the circle corresponds to Cook's distance") +
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(plot.title = element_text(size = 8, 
+                                  face = "bold", 
+                                  hjust = .5))
+```
+
+### 3. Several continuous predictors
+
+#### 3.1 The `stackloss` problem
+
+The following example is a modification of the [multiple-linear-regression section](http://www.r-tutor.com/elementary-statistics/multiple-linear-regression) from [R Tutorial](http://www.r-tutor.com/).
+
+
+```{r echo = T}
+data(stackloss)
+str(stackloss)
+```
+
+The description of the `stackloss` dataset is found in the [documentation](https://stat.ethz.ch/R-manual/R-devel/library/datasets/html/stackloss.html):
+
+- `Water Temp` is the temperature of cooling water circulated through coils in the absorption tower; 
+- `Air Flow` is the flow of cooling air;
+- `Acid Conc.` is the concentration of the acid circulating;
+- `stack.loss` (the outcome variable) is 10 times the percentage of the ingoing ammonia to the plant that escapes from the absorption column unabsorbed; that is, an (inverse) measure of the overall efficiency of the plant.
+
+```{r echo = T}
+stacklossModel = lm(stack.loss ~ Air.Flow + Water.Temp + Acid.Conc., 
+                    data = stackloss)
+summary(stacklossModel)
+```
+
+```{r echo = T}
+glance(stacklossModel)
+```
+
+```{r echo = T}
+tidy(stacklossModel)
+```
+Prediction for one single new data point:
+
+```{r echo = T}
+# predict new data
+obs = data.frame(Air.Flow = 72, 
+                 Water.Temp = 20, 
+                 Acid.Conc. = 85)
+predict(stacklossModel, obs)
+```
+
+The `confint()` functions works as usual, for 95% CI...
+
+```{r echo = T}
+confint(stacklossModel, level = .95) # 95% CI
+```
+
+... as well as for %99 CI:
+
+```{r echo = T}
+confint(stacklossModel, level = .99) # 99% CI
+```
+
+#### 3.2 Multicolinearity in Multiple Regression
+
+That crazy thing with multiple regression: if the predictors are not correlated at all, why not run a series of simple linear regressions? On the other hand, if the predictors are highly correlated, problems with the estimates arise... John Fox's `{car}` package allows us to compute the *Variance Inflation Factor* quite easily:
+
+```{r echo = T}
+VIF <- vif(stacklossModel)
+VIF
+```
+
+The Variance Inflation Factor (VIF) measures the increase in the *variance* of a regression coefficient due to colinearity. It's square root (`sqrt(VIF)`) tells us how much larger a standard error of a regression coefficient is compared to a hypothetical situation where there were no correlations with any other predictors in the model. **NOTE:** The lower bound of VIF is 1; there is no upper bound, but VIF > 2 typically indicates that one should be concerned.
+
+```{r echo = T}
+sqrt(VIF)
+```
+
+#### 3.3 Part correlation in multiple regression
+
+In multiple regression, it is the **semi-partial (or part)** correlation that you need to inspect: 
+
+- assume a model with `X1`, `X2`, `X3` as predictors, and `Y` as a criterion; 
+
+- you need a semi-partial of `X1` and `Y` following the removal of `X2` and `X3` from `Y`;
+
+- it goes like this: in Step 1, you perform a multiple regression `Y ~ X2 + X3`;
+
+- In Step 2, you take the residuals of `Y`, call them `RY`; 
+
+- in Step 3, you regress (correlate) `RY ~ X1`: the correlation coefficient that you get from Step 3 is the part correlation that you're looking for!
+
+Recall our model...
+
+```{r echo = T}
+stacklossModel = lm(stack.loss ~ Air.Flow + Water.Temp + Acid.Conc.,
+                    data = stackloss)
+summary(stacklossModel)
+```
+
+What is the semi-partial (part correlation) of `stack.loss` and `Air.Flow`? Remember the {pcorr} package? 
+
+```{r echo = T}
+spartCor1 <- spcor.test(x = stackloss$Air.Flow, 
+                        y = stackloss$stack.loss,
+                        z = stackloss[ , c("Water.Temp", "Acid.Conc.")],
+                        method = "pearson")
+print(spartCor1)
+```
+
+The unique contribution of `Air.Flow` is then:
+
+```{r echo = T}
+spartCor1$estimate
+```
+
+```{r echo = T}
+spartCor1$statistic
+```
+
+```{r echo = T}
+spartCor1$p.value
+```
+
+***
+
+### Further Readings
+
++ [Regression, by David M. Lane](http://onlinestatbook.com/2/regression/regression.html)
++ [{broom} package: Vignette](https://cran.r-project.org/web/packages/broom/vignettes/broom.html)
+
+
+### R Markdown
+
++ [R Markdown](https://rmarkdown.rstudio.com/) is what I have used to produce this beautiful Notebook. We will learn more about it near the end of the course, but if you already feel ready to dive deep, here's a book: [R Markdown: The Definitive Guide, Yihui Xie, J. J. Allaire, Garrett Grolemunds.](https://bookdown.org/yihui/rmarkdown/) 
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+

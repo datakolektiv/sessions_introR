@@ -1,0 +1,234 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Lab04
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Lab 04: On the `apply` family of functions
+  
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### What do we want to do today?
+
+We want to provide an overview of the `apply` family of functions in R and focus on their similarities and differences. 
+
+### 1. `lapply() and sapply()`
+
+Let's create a vector of 100 uniformly distributed random numbers on the [0, 1] interval:
+
+```{r echo = T}
+unifs <- runif(n = 100, min = 0, max = 1)
+head(unifs)
+```
+
+We can find out which elements in `unifs` are `> .5` by a simple R expression:
+
+```{r echo = T}
+probable <- unifs > .5
+sum(probable)
+```
+
+But we can do the same from `lapply()`:
+
+```{r echo = T}
+probable <- lapply(unifs, function(x) {x > .5})
+head(probable)
+```
+
+Except for now `probable` is a list - because `lapply()` returns a list by design. We want a vector; two ways to go, first is to  use `unlist()`:
+
+```{r echo = T}
+probable <- unlist(lapply(unifs, function(x) {x > .5}))
+head(probable)
+```
+
+`unlist()` is easy:
+
+```{r echo = T}
+a <- list(a = 5, 
+          b = 10, 
+          c = 17)
+unlist(a)
+```
+
+`unlist()` will automatically convert a named list to a named vector, as we can see; beware of the implicit type conversion in R:
+
+```{r echo = T}
+a <- list(a = "5", 
+          b = 10, 
+          c = 17)
+unlist(a)
+```
+
+The other way to obtain a vector in place of a list is to use the `sapply()` function:
+
+```{r echo = T}
+probable <- sapply(unifs, function(x) {x > .5})
+head(probable)
+```
+
+`sapply()` will try to simplify the `lapply()` result whenever it is possible to do so. Since our input was very simple - a vector of random numbers - the output was also very simple - a list with each element representing a single `logical` value - `sapply()` was able to complete the task exactly as expected.
+
+However, you need to be careful when using `sapply()`. Let's implement a slightly more complicated function:
+
+```{r echo = T}
+probable_57 <- sapply(unifs, function(x) {
+  point_5 <- x > .5
+  point_75 <- x > .75
+  return(c(point_5, 
+           point_75))
+  })
+head(probable_57)
+```
+
+`sapply()` has returned the result as a matrix:
+
+```{r echo = T}
+class(probable_57)
+```
+
+```{r echo = T}
+dim(probable_57)
+```
+
+The result of the `point_5 <- x > .5` call from the function are found in the first row, while the results of the `point_75 <- x > .75` call from the function are found in the second row.
+
+### 2. `mapply() and Map()`
+
+Let's now turn to `mapply()` and `Map()`. We have already seen `Map()` in action, e.g:
+
+```{r echo = T}
+v1 <- 1:10
+v2 <- seq(2, 20, by = 2)
+exps <- Map("^", v1, v2)
+print(exps)
+```
+
+A list of results is returned, as in `lapply()`. We can `unlist()` that, of course:
+
+```{r echo = T}
+exps <- unlist(Map("^", v1, v2))
+print(exps)
+```
+
+Now, we can accomplish exactly the same with `laplly()` or `sapply()` by rewriting our code in the following way:
+
+```{r echo = T}
+l <- Map(list, v1, v2)
+exps <- unlist(
+  lapply(l, function(x) {
+    x[[1]]^x[[2]]
+  })
+)
+print(exps)
+```
+
+What have I done? I have first used `Map()` to create a list of pairs of lists, each element in the pair coming first from `v1` and then from `v2`, look:
+
+```{r echo = T}
+l <- Map(list, v1, v2)
+head(l)
+```
+
+And then `lapply()` to compute:
+
+```{r echo = T}
+exps <- unlist(
+  lapply(l, function(x) {
+    x[[1]]^x[[2]]
+  })
+)
+print(exps)
+```
+
+Because `lapply()` takes a vector (or a list, but list is a vector) as its input, I can use only `function(x)` of one argument; I have created a list of lists so that I can compute `x[[1]]^x[[2]]` in the function call.
+
+And of course I could have used `sapply()` to simplify the result:
+
+```{r echo = T}
+exps <- sapply(l, function(x) {
+    x[[1]]^x[[2]]
+  })
+print(exps)
+```
+
+Another way to accomplish the same and avoid creating a list of lists to pass to `lapply()` or `sapply()` was to create a 2D array - a matrix - and pass it to `apply()`:
+
+```{r echo = T}
+v <- cbind(v1, v2)
+print(v)
+```
+
+```{r echo = T}
+apply(v, 1, function(x) {
+  x[1]^x[2]
+})
+```
+
+Remember: the second argument to `apply()` - `1` in this example - specifies the array dimension across which `function(x)` will operate; `1` for rows, `2` for columns, etc.
+
+Now, what is `mapply()`? We did not use this function before. Its relationship to `Map()` is similar to the relationship of `sapply()` to `mapply()`. 
+
+While `Map()` returns a list...
+
+```{r echo = T}
+l <- Map(list, v1, v2)
+head(l)
+```
+... `mapply()` tries to simplify:
+
+```{r echo = T}
+l <- mapply(list, v1, v2)
+head(l)
+```
+
+`Map()` is really just a wrapper around `mapply()`; you can pass a `SIMPLIFY` argument to it set to either `TRUE` or `FALSE`, look:
+
+```{r echo = T}
+l <- mapply(list, v1, v2, SIMPLIFY = FALSE)
+head(l)
+```
+
+So `Map()` is really just the same as `mapply(fun, fun_arguments, SIMPLIFY = TRUE)`.
+
+
+### R Markdown
+
+[R Markdown](https://rmarkdown.rstudio.com/) is what I have used to produce this beautiful Notebook. We will learn more about it near the end of the course, but if you already feel ready to dive deep, here's a book: [R Markdown: The Definitive Guide, Yihui Xie, J. J. Allaire, Garrett Grolemunds.](https://bookdown.org/yihui/rmarkdown/) 
+
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+

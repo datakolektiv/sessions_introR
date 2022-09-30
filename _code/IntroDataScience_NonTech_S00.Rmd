@@ -1,0 +1,126 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Session00
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Session 00: Installations, Organization, Intro Readings 
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### Welcome to R!
+
+![](../_img/Rlogo.png)
+
+### What do we want to do today?
+
+Our goal in `Session 00` is to prepare ourselves technically for what follows. We need to install (1) the programming language R, the RStudio IDE (IDE stands for: [Integrated Development Environment](https://en.wikipedia.org/wiki/Integrated_development_environment)), (3) understand how to organize our files and folders, and make sure that everything is working as expected.
+
+### 0. Prerequisits.
+
+None. You have your machine in front of you, and that machine is running any of the following operative systems:
+
+- Windows 10 (earlier versions are fine too)
+- Linux Ubuntu/Debian
+- macOS
+
+### 1. Install R
+
+**In case of any problems during the installation of R and RStudio, do not worry: we will review the procedure completelly in our first session.**
+
+**NOTE.** Please take care to install **the latest available versions**. At the time of this writing, those were:
+
+- Programming language R: `R-4.0.3`, [available here for Windows](https://cran.r-project.org/bin/windows/base/), [here for Mac](https://cran.r-project.org/bin/macosx/), and [here for Linux](https://cran.r-project.org/bin/linux/ubuntu/README.html).
+- RStudio Desktop: `RStudio Desktop 1.3.1093`, available [here](https://rstudio.com/products/rstudio/download/).
+
+
+Please follow the instructions provided here: 
+
+[Earth Data Analytics Online Certificate, 
+Lesson 1. Install & Set Up R and RStudio on Your Computer](https://www.earthdatascience.org/courses/earth-analytics/document-your-science/setup-r-rstudio/)
+
+Essentially, there are two installation steps: 
+
+- install R (the programming language)
+- install RStudio (your IDE, i.e. your working environment, where you write code, inspect data, etc.)
+
+**For Windows users:** [Video Instructions](https://www.youtube.com/watch?v=9-RrkJQQYqY&t=262s)
+
+**For Mac users:** [Video Instructions](https://www.youtube.com/watch?v=Y20P3u3c_1c)
+
+**For Linux users:** 
+
+- [Install R Instructions](https://www.digitalocean.com/community/tutorials/how-to-install-r-on-ubuntu-18-04-quickstart)
+- [Install RStudio Instructions](https://linuxconfig.org/how-to-install-rstudio-on-ubuntu-20-04-focal-fossa-linux)
+
+
+### 2. Organization
+
+It is of essential importance to keep your files and folders neatly organized. That is not important only to be able to follow this course: all successful Data Scientists suffer a bit from something similar to OCD (Obsessive compulsive disorder) when it comes to organizing their data and code into directories and code repositories.
+
+For each new step that I make in Data Science, for each new project, my approach to organization is the following:
+
+- I start a new directory which bears the project name (**NOTE.** Avoid using empty spaces, " ", in naming your files and directories!);
+- In that directory, I make three new directories:
+  - `_data` - where I intend to keep the raw data,
+  - `_analytics` - where I intend to keep the processed data,
+  - `_results` - where I intend to keep the outputs of my work, and
+  - `_img` - where I intend to keep any images that were produced in the course of my work in the project.
+  
+I suggest that, at least in the beginning, you use the same schema to organize your directories. Later on you can decide upon the exact form of organization that you find to be most suitable to you.
+
+
+### 3. Intro Readings and Videos
+
+- [r-project.org: What is R?](https://www.r-project.org/about.html)
+- [tutorialpoints.com: R Tutorial](https://www.tutorialspoint.com/r/index.htm) - no need to go through this material right now, just take a look at it and maybe invest time to read the first few chapters
+- [freecodecamp.org: R programming language explained](https://www.freecodecamp.org/news/r-programming-language-explained/)
+- [Getting started with R and RStudio](https://www.youtube.com/watch?v=lVKMsaWju8w): **please** do not skip this video!
+- [Wikipedia: R](https://en.wikipedia.org/wiki/R_(programming_language))
+
+
+### Highly Recommended To Do
+
+- Read [Chapters 1 to 3 from R for Data Science, Hadley Wickham & Garrett Grolemund](https://r4ds.had.co.nz/)
+- Read [Chapters 1 to 5 from Norman Matloff’s The Art of R Programming](https://www.google.com/search?client=firefox-b-d&channel=trow2&sxsrf=ALeKk03T_qLCMzRICYWj5UHqFBHnvfV6Uw%3A1607220795553&ei=Oz7MX8aeIYK6kwWc5JbgAw&q=Norman+Matloff+The+Art+of+R+Programming+pdf&oq=Norman+Matloff+The+Art+of+R+Programming+pdf&gs_lcp=CgZwc3ktYWIQAzIFCAAQyQM6BwgjEMkDECc6AgguUJk9WOdAYKRBaABwAHgAgAGHAYgB9QOSAQMwLjSYAQCgAQGqAQdnd3Mtd2l6wAEB&sclient=psy-ab&ved=0ahUKEwiGqOCEpLjtAhUC3aQKHRyyBTwQ4dUDCAw&uact=5)
+
+### R Markdown
+
+[R Markdown](https://rmarkdown.rstudio.com/) is what I have used to produce this beautiful Notebook. We will learn more about it near the end of the course, but if you already feel ready to dive deep, here's a book: [R Markdown: The Definitive Guide, Yihui Xie, J. J. Allaire, Garrett Grolemunds.](https://bookdown.org/yihui/rmarkdown/) 
+
+
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+

@@ -1,0 +1,529 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Session13
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Session 13: Introduction to Estimation Theory. Partial and part correlation. The logic of statistical modeling elaborated. Enters the Sim-Fit loop. The bias of a statistical estimate. Parametric bootstrap.
+
+
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### What do we want to do today?
+
+We introduce the concepts of partial and part correlation, of essential importance in multiple linear regression, and take a look at what R has to offer in the  [{ppcor}](https://cran.r-project.org/web/packages/ppcor/index.html) package in that respect. Then we go back to the simple linear regression model and discuss its assumption. All statistical models make some assumptions about the data, and only if their assumptions are satisfied then the application of the model to the data is justified. We proceed by introducing the concept of *bias* of a statistical estimate and introduce a way to estimate it via numerical simulations: *the parametric bootstrap*.
+
+
+### 0. Prerequisits
+
+Install:
+
+```{r echo = T, eval = F, message = F, warning = F}
+install.packages('car')
+install.packages('ppcor')
+```
+
+Setup:
+
+```{r echo = T, message = F, warning = F}
+library(tidyverse)
+library(data.table)
+library(Hmisc)
+library(ppcor)
+library(car)
+dataDir <- paste0(getwd(), "/_data/")
+```
+
+
+### 1. Residuals, Partial and Part Correlation
+
+The concepts of *partial* and *part correlation* are useful in the description of *mediation*. We have two RVs, $X$ and $Y$, and we are interested in the strength of their linear relationship. However, there is also another variable (or, a set of variables), $Z$, that is related to $X$ and $Y$, and we ask: how does this additional $Z$ variable affects the relationship between $X$ and $Y$?
+
+*Partial correlation* presents the most straightforward answer to this question. It is the coefficient of linear correlation that one obtains between $X$ and $Y$ after removing the *shared variance* of $X$ and $Z$, and of $Y$ and $Z$.
+
+We will use the {ppcor} package to compute partial correlations in the following example. Before that: can we explain partial correlation conceptually? It turns out that is not difficult to explain what partial correlation is once the simple linear regression model is introduced.
+
+``` {r echo = T, message = F}
+linFit <- lm(data = iris,
+             Petal.Length ~ Sepal.Length)
+linFitPlot <- data.frame(
+  x = iris$Sepal.Length,
+  y = iris$Petal.Length,
+  predicted = linFit$fitted.values,
+  residuals = linFit$residuals
+)
+ggplot(data = linFitPlot,
+       aes(x = x, y = y)) +
+  geom_smooth(method = lm, se = F, color = "red", size = .25) +
+  geom_segment(aes(x = x, 
+                   y = predicted, 
+                   xend = x, 
+                   yend = predicted + residuals),
+               color = "black", size = .2, linetype = "dashed") +
+  geom_point(aes(x = x, y = y), color = "black", size = 2) +
+  geom_point(aes(x = x, y = y), color = "white", size = 1.5) +
+  geom_point(aes(x = x, y = predicted), color = "red", size = 1) +
+  xlab("Sepal.Length") + ylab("Petal.Length") +
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+We have `Sepal.Length` on the x-axis, and `Petal.Length` on the y-axis, producing a scatter plot of a sort that we have already seen many times before. If the relationship between the two variables was perfectly linear, all points would fall on the regression line. In this plot, the red dots represent the predictions from the best-fitting line in a plane where the x and y axes are spawned by the variables of interest. However, the relationship is not perfectly linear, as it can be observed from the vertical deviations of the data points from the line. The distance between what a linear model would predict (red points) and the actual data (white points) is called a *residual*. Residuals are represented by vertical lines connecting the model predictions and actual data points in this plot. The best-fitting line is exactly the one that *minimizes* these residuals that are considered as *model errors*.
+
+Take $X$ to be `Sepal.Length`, $Y$ to be `Petal.Length`, and $Z$ to be `Sepal.Width`: how does the correlation between $Z$ and $X$, on one, and $Z$ and $Y$, on the other hand, affects the correlation between $X$ and $Y$? Let's plot $Z$ vs. $X$ and $Z$ vs. $Y$:
+
+``` {r echo = T, message = F}
+linFit <- lm(data = iris,
+             Sepal.Length ~ Sepal.Width)
+linFitPlot1 <- data.frame(
+  x = iris$Sepal.Width,
+  y = iris$Sepal.Length,
+  predicted = linFit$fitted.values,
+  residuals = linFit$residuals
+)
+linFit <- lm(data = iris,
+             Petal.Length ~ Sepal.Width)
+linFitPlot2 <- data.frame(
+  x = iris$Sepal.Width,
+  y = iris$Petal.Length,
+  predicted = linFit$fitted.values,
+  residuals = linFit$residuals
+)
+linFitPlot <- rbind(linFitPlot1, linFitPlot2)
+linFitPlot$Plot <- factor(c(rep("Sepal.Length",150), rep("Petal.Length",150)),
+                             levels = c("Sepal.Length", "Petal.Length"))
+
+ggplot(data = linFitPlot,
+       aes(x = x, y = y)) +
+  geom_smooth(method = lm, se = F, color = "red", size = .25) +
+  geom_segment(aes(x = x, 
+                   y = predicted, 
+                   xend = x, 
+                   yend = predicted + residuals),
+               color = "black", size = .2, linetype = "dashed") +
+  geom_point(aes(x = x, y = y), color = "black", size = 2) +
+  geom_point(aes(x = x, y = y), color = "white", size = 1.5) +
+  geom_point(aes(x = x, y = predicted), color = "red", size = 1) +
+  xlab("Sepal.Width") + ylab("") +
+  theme_classic() +
+  facet_grid(. ~ Plot) + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(strip.background = element_blank()) +
+  theme(axis.text.x = element_text(size = 6)) + 
+  theme(axis.text.y = element_text(size = 6)) 
+```
+
+`Sepal.Width` has some correlation with both `Sepal.Length` and `Petal.Length`; upon plotting the best fitting lines, we can observe some residuals on both plots too. *Partial correlation* of `Sepal.Length` and `Petal.Length`, while controlling for `Sepal.Width`, is nothing else than *the correlation between the residuals of `Sepal.Length` and `Petal.Length` following the linear regression of `Sepal.Width` on both variables*:
+
+``` {r echo = T}
+partialCor <- cor(linFitPlot$residuals[1:150],  # Sepal.Length residuals
+                  linFitPlot$residuals[151:300] # Petal.Length residuals
+)
+partialCor
+```
+
+In comparison to:
+
+``` {r echo = T}
+cor(iris$Sepal.Length, iris$Petal.Length)
+```
+
+we can conclude that the coefficient of linear correlation between these two variables increases after controlling for the effect of `Sepal.Width`!
+
+In {ppcor}, the same partial correlation would be computed in the following way:
+
+``` {r echo = T}
+# partial correlation w. {ppcor}
+dataSet <- iris
+dataSet$Species <- NULL
+partialCor1 <- pcor.test(dataSet$Sepal.Length, dataSet$Petal.Length,
+                         dataSet$Sepal.Width,
+                         method = "pearson")
+partialCor1$estimate
+```
+
+And of course:
+
+``` {r echo = T}
+partialCor1$p.value
+```
+
+``` {r echo = T}
+partialCor1$statistic
+```
+
+For the matrix of partial correlations, where the correlation of each pair of variables is computed after controlling for the effects of all the remaining variables, {ppcor} offers:
+
+``` {r echo = T}
+#### partial correlation in R
+dataSet <- iris
+dataSet$Species <- NULL
+irisPCor <- pcor(dataSet, method = "pearson")
+irisPCor$estimate # partial correlations
+```
+
+``` {r echo = T}
+irisPCor$p.value # results of significance tests
+```
+t-test on n-2-k degrees of freedom ; k = num. of variables conditioned:
+
+``` {r echo = T}
+irisPCor$statistic
+```
+
+Good. And now, what a *part* - also known as *semi-partial* correlation would be? Take a look again at the previous plot, where `Sepal.Width` predicts `Sepal.Length` on the left, and `Petal.Length` on the right panel; residuals from both linear regressions are present. Partial correlation of `Sepal.Length` and `Petal.Length` was obtained by removing the effect of `Sepal.Width` from both variables, and, in effect, all that we had to do to obtain was to compute the correlation coefficient from the residuals - or, *from what remains after removing what was predicted by* `Sepal.Width` *from these two variables*. A *semi-partial*, or *part correlation* would be obtained if we had removed the effect of `Sepal.Width` from the second variable only: that would be `Petal.Length` in this case. It results in a correlation between (a) `Sepal.Length` and (b) what is left from `Petal.Length` (the residuals) after controlling for the effect of `Sepal.Width`:
+
+``` {r echo = T}
+partCor <- cor(iris$Sepal.Length,  # Sepal.Length in itself
+            linFitPlot$residuals[151:300] # Petal.Length residuals
+            )
+partCor
+```
+
+In {ppcor}, this part correlation is obtained by:
+
+``` {r echo = T}
+partCor <- spcor.test(dataSet$Sepal.Length, dataSet$Petal.Length,
+                      dataSet$Sepal.Width,
+                      method = "pearson")
+partCor$estimate
+```
+
+As ever, the p-value:
+
+``` {r echo = T}
+partCor$p.value
+```
+
+and the t-test:
+
+``` {r echo = T}
+partCor$statistic
+```
+
+If we're interested in a matrix of semi-partial correlations, where the first variable - the one from which no effects of any other variables will be removed - is found rows, and the second variable - the one from which the effects of all the remaining variables in the data set will be removed - found in columns:
+
+``` {r echo = T}
+irisSPCor <- spcor(dataSet, method = "pearson")
+irisSPCor$estimate
+```
+
+``` {r echo = T}
+irisSPCor$p.value
+```
+
+``` {r echo = T}
+irisSPCor$statistic
+```
+
+### 2. Simple Linear Regression: Model Assumptions
+
+We will spend some time in inspecting the validity of this linear regression model as a whole. Usually termed *model diagnostics*, the following procedures are carried over to ensure that the model assumptions hold. Unfortunately, even for a model as simple as a simple linear regression, testing for model assumptions tends to get nasty all the way down... Most of the criteria cannot be judged by simply assessing the values of the respective statistics, and one should generally consider the model diagnostics step as a mini-study on its own - and the one going well beyond the time spent to reach the conclusions of the model performance on the data set, because none of one's conclusions on the data set truly hold from a model whose assumptions are not met. Sadly, this is a fact that is overlooked too often in contemporary applied statistics.
+
+#### 2.1 The Linearity Assumption
+
+In fact, we have already tested for this:
+
+``` {r echo = t, message = F}
+#### Test 1: Linearity assumption
+# Predictor vs Criterion {ggplot2}
+ggplot(data = iris, aes(x = Sepal.Length,
+                        y = Petal.Length,
+                        color = Species)
+       ) + 
+  geom_point(size = 1.5) +
+  geom_smooth(method = 'lm', size = .25, se = F) + 
+  ggtitle('Sepal Length vs Petal Length') + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+The linearity assumption is obviously not satisfied!
+
+#### 2.2 The Normality of Residuals
+
+We have already played with this too, in a different way only:
+
+```{r echo = t, fig.width = 5, fig.height = 5}
+reg <- lm(Petal.Length ~ Sepal.Length, 
+          data = iris)
+resStReg <- rstandard(reg)
+qqnorm(resStReg)
+qqline(resStReg, col = "red")
+```
+
+What is `rstandard()`? See: [standardized residual](http://www.r-tutor.com/elementary-statistics/simple-linear-regression/standardized-residual). We will discuss this in the session as we introduce the concept of *leverage*.
+
+Let' see what does the Shapiro-Wilk tells:
+
+``` {r echo = T}
+shapiro.test(reg$residuals)
+```
+
+- and it seems like this assumption is met.
+
+#### 2.3 Constant variance (or Homoscedasticity)
+
+The model error (i.e. variance, computed from the model residuals) should be constant on all levels of the criterion:
+
+``` {r echo = T, message = F}
+# Predicted vs. residuals {ggplot2}
+predReg <- predict(reg) # get predictions from reg
+resReg <- residuals(reg) # get residuals from reg
+plotFrame <- data.frame(predicted = predReg,
+                        residual = resReg)
+# plot w. {ggplot2}
+ggplot(data = plotFrame,
+       aes(x = predicted, y = residual)) +
+  geom_point(size = 1.5, 
+             colour = 'blue') +
+  geom_smooth(method = 'lm',
+              size = .25,
+              alpha = .25, 
+              color = "red") + 
+  ggtitle("Predicted vs Residual") + 
+  xlab("Predicted") + ylab("Residual") + 
+  theme_bw() +
+  theme(legend.position = "none") + 
+  theme(panel.border = element_blank())
+```
+
+This can be confusing if one does not recall that we have fitted the model by having only one sample of observations at hand. Imagine drawing a sample of `Sepal.Length` and `Petal.Length` values repeatedly and trying to predict one from another from a previously fitted simple linear regression model. It is quite probable that we would get at observing varying residuals (model errors) for different draws of `Petal.Length` observed on the same level `Sepal.Length` upon prediction. However, the distribution of these residuals, more precisely: *its variance*, must be constant across all possible levels of `Petal.Length`. That is why we choose to inspect the scatter plot of predicted `Petal.Length` values vs. their respective residuals. Essentially, one should not be able to observe any regularity in this plot; if it turns out that any pattern emerges, i.e. that it is possible to predict the residuals from the levels of criterion - the simple linear model should abandoned.
+
+Our simple linear regression model obviously suffers from *heteroscedasticity*, or a lack of constant variance across the measurements. The cause of the heteroscedasticity in this case is related to the existence of clusters of related observations, determined by the type of flower in the `iris` data set. 
+
+#### 2.4 No outliers or influential cases
+
+There are a plenty of proposed procedures to detect influential cases in simple linear regression. The `influence.mesures()` function will return most of the interesting statistics in this respect:
+
+``` {r echo = T}
+infMeas <- influence.measures(reg)
+class(infMeas)
+```
+
+``` {r echo = T}
+str(infMeas)
+```
+
+What you need to extract from `infMeans` now is the `$infmat` field:
+
+``` {r echo = T}
+# as data.frame
+infReg <- as.data.frame(influence.measures(reg)$infmat)
+head(infReg)
+```
+
+Sometimes, people focus on *Cook's distances*: they are used to detect the influential cases by inspecting the effect of removal of each data point on the linear model. Cook and Weisberg (1982) consider values greater than 1 are troublesome:
+
+``` {r echo = T}
+wCook <- which(infReg$cook.d >1)
+wCook # we seem to be fine here
+```
+
+The *leverage* tells us how influential a data point is by measuring how *unusual* or *atypical* is the combination of predictor values - in case of multiple linear regression - for that observation; in case of simple linear regression, try to think of it as simply a measure of how "lonely" a particular point is found on the predictor scale. For an introductory text I recommend: [Influential Observations, from David M. Lane's Online Statistics Education: An Interactive Multimedia Course of Study](https://onlinestatbook.com/2/regression/influential.html); for details, see: [Leverage in simple linear regression](https://math.stackexchange.com/questions/3325504/leverage-in-simple-linear-regression).
+
+``` {r echo = T}
+# - Leverage: hat values
+# - Average Leverage = (k+1)/n, k - num. of predictors, n - num. observations
+# - Also termed: hat values, range: 0 - 1
+# - see: https://en.wikipedia.org/wiki/Leverage_%28statistics%29
+# - Various criteria (twice the average leverage, three times the average leverage...)
+# - Say, twice the leverage:
+k <- 1 # - number of predictors
+n <- dim(iris)[1] # - number of observations
+wLev <- which(infReg$hat > 2*((k + 1)/n))
+print(wLev)
+```
+
+Finally, to inspect the influential cases visually, we can produce the Influence Plot, combining information on standardized residuals, leverage, and Cook's distances:
+
+``` {r echo = T}
+## Influence plot
+plotFrame <- data.frame(residual = resStReg,
+                        leverage = infReg$hat,
+                        cookD = infReg$cook.d)
+ggplot(plotFrame,
+       aes(y = residual,
+           x = leverage)) +
+  geom_point(size = plotFrame$cookD*100, shape = 1, color = 'blue') +
+  ggtitle("Influence Plot\nSize of the circle corresponds to Cook's distance") +
+  theme(plot.title = element_text(size=8, face="bold")) +
+  ylab("Standardized Residual") + xlab("Leverage") + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(plot.title = element_text(hjust = .5))
+```
+
+#### 2.5 No autocorrelation in residuals
+
+The final twist is related to the assumption that the model errors are not *autocorrelated*. The autocorrelation of a variable exists when its previously measured values are correlated with its subsequent measurements. The autocorrelation can be computed for different values of the *lag*, defining how far apart are the "present" and "past" observations of a variable assumed to be. For example, given $X = x_1, x_2, ..., x_n$, one can compute the autocorrelation at lag of 1 by correlating $X_i$ with $X_{i-1}$, or at lag of 2 by correlating  $X_i$ with $X_{i-2}$, etc.
+
+In the setting of simple linear regression, the autocorrelation test that is most frequently met is the *Durbin-Watson statistic*: 
+
+``` {r echo = T}
+# - D-W Statistic < 1 --> problematic {car}
+durbinWatsonTest(reg)
+```
+
+The Durbin-Watson statistic will have a value of **2** if no autocorrelation at all is present in the model residuals. It tests the null hypothesis that the autocorrelation is zero, so that its statistical significance ($p < .05$, conventionally) indicates that the autocorrelation in residuals is present.
+
+### 3. Bias and variance of a statistical estimate. Parametric bootstrap.
+
+Let's estimate the linear regression model with `Petal.Length` as a criterion and `Sepal.Length` as a predictor again:
+
+```{r echo = T}
+regModel <- lm(Petal.Length ~ Sepal.Length,
+               data = iris)
+coefs <- coefficients(regModel)
+print(coefs)
+```
+
+Ok. Now, we need to learn about the variation in the model error. Let's compute the standard deviation of the model residuals:
+
+```{r echo = T}
+residuals <- residuals(regModel)
+std_res <- sd(residuals)
+print(std_res)
+```
+
+Enters the **sim-fit loop**: parametric bootstrap for the simple linear regression model. We will use `10,000` bootstrap samples. In each iteration we use the original values of the predictor - `iris$Sepal.Length` - and the *estimated* model coefficients to compute the predictions: `y_hat` values. Then we introduce randomness from the estimated standard deviation of the residuals - `std_res` - by drawing one observation from `Normal(mean = y_hat, sd = std_res) and pairing that value with the respective value of the predictors. *Then* we estimate the linear regression model from the boostrapped sample and pick up the coefficients from it. The distribution of the boostraped model coefficients is quite telling as we will observe.  
+
+> The population is to the sample as the sample is to the bootstrap samples.
+-- John Fox, 2002, Bootstrapping Regression Models, Appendix to An R and S-PLUS Companion to Applied Regression.
+
+```{r echo = T}
+n_bootstrap_samples <- 1:10000
+bootstrap_estimates <- lapply(n_bootstrap_samples, function(x) {
+  # - bootstrap! 
+  y_hats <- coefs[2] * iris$Sepal.Length + coefs[1]
+  y_hats <- sapply(y_hats, function(x) {
+    rnorm(1, x, std_res)
+  })
+  # - boostrapped data:
+  boot_frame <- data.frame(Sepal.Length = iris$Sepal.Length, 
+                           Petal.Length = y_hats)
+  # - estimate linear model
+  boot_regModel <- lm(Petal.Length ~ Sepal.Length,
+                      data = boot_frame)
+  # - extract coefficients
+  boot_coefs <- coefficients(boot_regModel)
+  return(as.data.frame(t(boot_coefs)))
+})
+bootstrap_estimates <- rbindlist(bootstrap_estimates)
+head(bootstrap_estimates)
+```
+
+```{r echo = T}
+ggplot(bootstrap_estimates, 
+       aes(x = Sepal.Length)) + 
+  geom_histogram(binwidth = .001, 
+                 fill = 'darkorange', 
+                 color = 'darkorange') +
+  ggtitle("Boostrap estimates of the slope") + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(plot.title = element_text(hjust = .5))
+```
+
+```{r echo = T}
+coefs[2]
+```
+
+```{r echo = T}
+mean(bootstrap_estimates$Sepal.Length)
+```
+The bias of the slope estimate is then:
+
+```{r echo = T}
+coefs[2] - mean(bootstrap_estimates$Sepal.Length)
+```
+And the variance of the slope estimate is:
+
+```{r echo = T}
+var(bootstrap_estimates$Sepal.Length)
+```
+Let's see about the intercept then:
+
+```{r echo = T}
+ggplot(bootstrap_estimates, 
+       aes(x = `(Intercept)`)) + 
+  geom_histogram(binwidth = .001, 
+                 fill = 'darkred', 
+                 color = 'darkred') +
+  ggtitle("Boostrap estimates of the intercept") + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(plot.title = element_text(hjust = .5))
+```
+
+```{r echo = T}
+coefs[1]
+```
+
+```{r echo = T}
+mean(bootstrap_estimates$`(Intercept)`)
+```
+
+```{r echo = T}
+var(bootstrap_estimates$`(Intercept)`)
+```
+And the bias of the intercept estimate is then:
+
+```{r echo = T}
+coefs[1] - mean(bootstrap_estimates$`(Intercept)`)
+```
+
+***
+
+### Further Readings
+
+- To learn more about the great {ppcor} package: [An R Package for a Fast Calculation to Semi-partial Correlation Coefficients (2015), Seongho Kim, Biostatistics Core, Karmanos Cancer Institute, Wayne State University.](http://www.ncbi.nlm.nih.gov/pmc/articles/PMC4681537/)
+
+### Readings for Session 14:
+
+*Session 14 will introduce the Multiple Linear Regression Model*. You can rely on David M. Lane's online tutorial to refresh your math:
+
++ [Regression, by David M. Lane](http://onlinestatbook.com/2/regression/regression.html)
+
+
+### R Markdown
+
+[R Markdown](https://rmarkdown.rstudio.com/) is what I have used to produce this beautiful Notebook. We will learn more about it near the end of the course, but if you already feel ready to dive deep, here's a book: [R Markdown: The Definitive Guide, Yihui Xie, J. J. Allaire, Garrett Grolemunds.](https://bookdown.org/yihui/rmarkdown/) 
+
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+

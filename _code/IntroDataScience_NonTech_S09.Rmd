@@ -1,0 +1,604 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Session09
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Session 09: The Relational Data Model w. {dplyr} + Statistical Hypothesis testing from the $\chi^2$ Distribution
+
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### What do we want to do today?
+
+The Relational Data Model: we will work to build an understanding of **join operations** in relational data representations (e.g. such as sets of R dataframes and similar structures). **Statistical Hypothesis Testing** begins: we will learn about the $\chi^2$ distribution and the related statistical test. Can you tell one distribution from another? Examples on real world data.
+
+
+### 0. Prerequisits
+
+We will use the Wikimedia Foundation's [Product Analytics/Comparison datasets](https://www.mediawiki.org/wiki/Product_Analytics/Comparison_datasets) in this session. In order to download the datasets you will need to open the following Google Spreadsheet: [Wiki comparison [public]](https://docs.google.com/spreadsheets/d/1a-UBqsYtJl6gpauJyanx0nyxuPqRvhzJRN817XpkuS8/edit#gid=643792039).
+
+Then:
+
+- Go to the **Dec 2020** tab -> File menu, Download -> Comma-separated values;
+- switch to the **Dec 2019** tab -> File menu, Download -> Comma-separated values;
+- place both files, `Wiki comparison [public] - Dec 2020.csv` and `Wiki comparison [public] - Dec 2019.csv` into your `_data` folder for this session.
+
+Of course:
+
+```{r echo = T, message = F, warning = F}
+library(tidyverse)
+set.seed(9999)
+```
+
+### 1. Relational data
+
+#### 1.1 Comparing Wikipedias
+
+The two new datasets that we will be using in this session were produced by the [Wikimedia Foundation's Product Analytics team](https://www.mediawiki.org/wiki/Product_Analytics) and are publicly shared via a [Google Spreadsheet](https://docs.google.com/spreadsheets/d/1a-UBqsYtJl6gpauJyanx0nyxuPqRvhzJRN817XpkuS8/edit#gid=643792039). Both datasets encompass a number of variables describing each Wikimedia Foundation's Wiki - notice that only some of them are Wikipedias, because we also have Wikivoyage, Wikidata, Wiktionaries, etc. - by quantitative measurements related mostly to editor and reader behavior. Let's load the data and see what is there!
+
+```{r echo = T}
+dataDir <- "C:/Users/goran/___DataKolektiv/__EDU/01_IntroDataScience_Non-Tech/_Code/IntroDataScience_NonTech_S09/_data/"
+lF <- list.files(dataDir)
+print(lF)
+```
+Ok, load:
+
+```{r echo = T}
+wikiComparison2019 <- read.csv(paste0(dataDir, "Wiki comparison [public] - Dec 2019.csv"), 
+                               header = T,
+                               check.names = F,
+                               stringsAsFactors = F)
+wikiComparison2020 <- read.csv(paste0(dataDir, "Wiki comparison [public] - Dec 2020.csv"), 
+                               header = T,
+                               check.names = F,
+                               stringsAsFactors = F)
+```
+
+The variables present in `wikiComparison2019` and `wikiComparison2020`:
+
+```{r echo = T}
+colnames(wikiComparison2019)
+```
+
+```{r echo = T}
+colnames(wikiComparison2020)
+```
+**Note.** Be very careful about the following fact:
+
+```{r echo = T}
+glimpse(wikiComparison2019)
+```
+
+You can use `dplyr::glimpse()` in a way similar as we have previously used `str()` on dataframes in R: it has a more user-friendly output. And the fact that I had on my mind is that we are reading many numerical values as members of the `character()` class in R!
+
+We can see that both dataframes have a column titled `""` in the first position, signifying the Wiki project that identifies a particular row. That is not good, and then the solution is to do `read.csv()` with `row.names = 1`:
+
+```{r echo = T}
+wikiComparison2019 <- read.csv(paste0(dataDir, "Wiki comparison [public] - Dec 2019.csv"), 
+                               header = T,
+                               check.names = F,
+                               row.names = 1,
+                               stringsAsFactors = F)
+wikiComparison2020 <- read.csv(paste0(dataDir, "Wiki comparison [public] - Dec 2020.csv"), 
+                               header = T,
+                               check.names = F,
+                               row.names = 1,
+                               stringsAsFactors = F)
+```
+
+However, row names are not - trust me on this one - particularly useful in data analysis with R. Let me introduce a new column, produced from the row names in both dataframes, that will serve as our unique identifier for each Wiki in the data:
+
+```{r echo = T}
+wikiComparison2019$wiki <- rownames(wikiComparison2019)
+wikiComparison2020$wiki <- rownames(wikiComparison2020)
+```
+
+**Note.** You might have spotted the presence of the `wiki name` column in `wikiComparison2019` which is the same as the `wiki` column that I have just produced. However, having and id column which has a name exactly the same across the dataframes under analysis is a bit more consistent and makes life easier. However, we will keep the `wiki name` column in `wikiComparison2019` to demonstrate something later on.
+
+Do the column names in the two dataframes match?
+
+```{r echo = T}
+identical(tolower(colnames(wikiComparison2019)), 
+          tolower(colnames(wikiComparison2020)))  
+```
+Not even after `tolower()`! What about the rownames?
+
+```{r echo = T}
+identical(tolower(rownames(wikiComparison2019)), 
+          tolower(rownames(wikiComparison2020)))  
+```
+And it is not possible for them to be `identical()`, of course, as we know that `dim(wikiComparison2019)` is:
+
+```{r echo = T}
+print(dim(wikiComparison2019))
+```
+
+while `dim(wikiComparison2020)` is:
+
+```{r echo = T}
+print(dim(wikiComparison2020))
+```
+Be aware that situations like this are *more than common* in our line of work. The team that has produced these data - look at their [Github repo](https://github.com/wikimedia-research/wiki-segmentation/tree/master/data-collection) - is a very good one indeed, but the complexity that they need to struggle with can be overwhelming from time to time and no wonder then that a small inconsistency like non-matching column names appears here and there. However, most of such things are easily fixed. Remember: **nothing is perfect**, and because that is so the most of your work as a Data Scientist/Analyst falls in the Data Wrangling arena, and that means mastering things like `{dplyr}`, `{tidyr}`, `{data.table}` and others is a must. 
+
+And I still want to compare Wikipedias. For example, I would like to be able to answer the following questions: is the number of `active monthly editors` across the Wikipedias any different in 2019 and 2020? What do I need to do to find out? 
+
+#### 1.2 {dplyr}: select, filter, and then join
+
+We have already used `dplyr::select()` and `dplyr::filter()`, and we now want to introduce the join operations in `{dplyr}`. Let's begin by selecting exactly what we need from the two dataframes in order to compare the numbers of active monthly editors in 2019 and 2020:
+
+```{r echo = T}
+monthlyActive2019 <- wikiComparison2019 %>% 
+  select(wiki, 
+         `monthly active editors`) %>% 
+  filter(str_detect(wiki, "Wikipedia"))
+# - fix `monthly active editors`: from character() to numeric()
+monthlyActive2019$`monthly active editors` <- as.numeric(
+  gsub(",", "", monthlyActive2019$`monthly active editors`)
+  )
+monthlyActive2019 <- arrange(monthlyActive2019, 
+                             desc(`monthly active editors`))
+```
+
+The `select()` part of the pipeline should be self-explanatory - we need to know what Wikipedias do we have in the dataset and what count of active monthly editors stands for which Wikipedia - while the `filter()` in combination with `str_detect()` from `{stringr}` serves to filter out Wikipedias only (remember: there is more than Wikipedia in the Wikimedia Universe). The `arrange(desc())` piece sorts the dataset by a decreasing count of editors, and before that we had to use a few lines to fix `active monthly editors` from `character` to `dbl`. The same for `wikiComparison2020`:
+
+```{r echo = T}
+monthlyActive2020 <- wikiComparison2020 %>% 
+  select(wiki, 
+         `monthly active editors`) %>% 
+  filter(str_detect(wiki, "Wikipedia"))
+# - fix `monthly active editors`: from character() to numeric()
+monthlyActive2020$`monthly active editors` <- as.numeric(
+  gsub(",", "", monthlyActive2020$`monthly active editors`)
+  )
+monthlyActive2020 <- arrange(monthlyActive2020, 
+                             desc(`monthly active editors`))
+```
+
+And now I should just `cbind()` the two dataframes, right? Well, no. **Q.** Is the order of Wikipedias the same in the two dataframes? Are they of the same dimension (i.e. do they both encompass the same number of observations, because they are made to have the same columns)? The answer to the second question is no. For the first one: it is not necessarily so. So what do we do? We need to **join** these two dataframes.
+
+```{r echo = T}
+colnames(monthlyActive2019)[2] <- 'monthlyActive2019'
+colnames(monthlyActive2020)[2] <- 'monthlyActive2020'
+monthlyActiveComparison <- left_join(monthlyActive2020, 
+                                     monthlyActive2019,
+                                     by = 'wiki')
+```
+
+What does `dplyr::left_join()` do?
+
+- First, as the name suggests, the order of dataframes matters: in our call to `left_join()` we have first specified `monthlyActive2020`, and then only `monthlyActive2019`, and that means that `monthlyActive2020` will be the **left table** in the join, and that `monthlyActive2019` will be the **right table** in the join;
+- Second, we have specified which **key variable** will be used to perform the join operation - `by = 'wiki'` - choosing a key that is present in both tables;
+- The `left_join()` operation proceeds as following: (1) look in the right table and find everything that has its match in the left table on the defined key column, (2) grab all the values from the columns in the right table and copy them into the left table in the place where a corresponding match on the key column is found, and (3) keep everything from the left table and use `NA` to indicate that no match was found. 
+
+Now, my decision to use `monthlyActive2020` as the left table was motivated by the fact that `left_join()` keeps everything from the left table, i.e. it does not eliminate the non-matching rows from it, and `monthlyActive2020` has more observations present than `monthlyActive2019`:
+
+```{r echo = T}
+dim(monthlyActive2020)
+dim(monthlyActive2019)
+```
+and I am thus certain that 
+
+```{r echo = T}
+sum(is.na(monthlyActiveComparison$monthlyActive2019))
+```
+is exactly four, because `302 - 298 == 4` is `TRUE`.
+
+There is also something called `right_join()` that accomplishes the same if you switch the order of your dataframes:
+
+```{r echo = T}
+monthlyActiveComparisonRight <- right_join(monthlyActive2019,
+                                           monthlyActive2020,
+                                           by = 'wiki')
+```
+
+except for that the order of columns will be different in the resulting dataframe obtained from `left_join()` and `right_join()`.
+
+Every entry in `monthlyActiveComparison$wiki` contains `" Wikipedia"`; fix:
+
+```{r echo = T}
+monthlyActiveComparison$wiki <- 
+  gsub(" Wikipedia", "", monthlyActiveComparison$wiki)
+```
+
+Let's visualize the number of active monthly editors in all Wikipedias which had `>=50` of them either in 2019 or 2020:
+
+```{r echo = T, message = F, warning = F, fig.width = 10}
+plotMonthlyActive <- monthlyActiveComparison %>% 
+  filter(monthlyActive2020 >= 50|monthlyActive2019 >= 50) %>% 
+  pivot_longer(cols = -wiki,
+               names_to = 'observation', 
+               values_to = 'editorCount')
+ggplot(plotMonthlyActive, aes(x = wiki, 
+                              y = editorCount, 
+                              group = observation, 
+                              color = observation, 
+                              fill = observation)) + 
+  geom_line(size = .25) + 
+  geom_point(size = 1.5) + 
+  scale_color_manual(values = c("darkorange", "darkred")) + 
+  scale_y_continuous(trans = 'log') + 
+  ggtitle("Wikipedia Comparison: Active Monthly Editors 2019/2020") +
+  ylab("log(Active Monthly Editors)") + xlab("Wikipedia") +
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(plot.title = element_text(hjust = .5)) + 
+  theme(axis.text.x = element_text(angle = 90, 
+                                   hjust = 0.95, 
+                                   vjust = 0.2, 
+                                   size = 9)) + 
+  theme(legend.position = "top")
+```
+The 2020 observations seem to follow the 2019 observations pretty much, but we will use a stricter method to test if that is true later on. We need more focus on join operations: there is more to `left_join()` and `right_join()`, of course!
+
+#### 1.3 More join operations in {dplyr}
+
+You might recall how we have decided to position `monthlyActive2019` to the right and `monthlyActive2020` to the left in `left_join()` previously? The decision was motivated by the fact that there were four more observations present in `monthlyActive2020`. But I was incorrectly assuming - incorrectly only because I did not check - that the fact that there are more observations present in the later dataset implies that it at the same time encompasses *everything* found in the former dataset. That is not necessarily so. What if I want to make sure to collect only the observations for Wikipedias that are certainly found in both datasets? Enters `inner_join()`:
+
+```{r echo = T}
+monthlyActiveComparisonInner <- inner_join(monthlyActive2020,
+                                           monthlyActive2019,
+                                           by = 'wiki')
+```
+
+Let's compare `monthlyActiveComparisonInner` with `monthlyActiveComparison` (the later was produced from a `left_join()`, remember):
+
+```{r echo = T}
+dim(monthlyActiveComparisonInner)
+dim(monthlyActiveComparison)
+```
+And:
+
+```{r echo = T}
+sum(is.na(monthlyActiveComparisonInner$monthlyActive2019))
+sum(is.na(monthlyActiveComparisonInner$monthlyActive2020))
+```
+because only matching observations (i.e. records) from both tables were kept. In other words:
+
+> "The most important property of an inner join is that unmatched rows are not included in the result. This means that generally inner joins are usually not appropriate for use in analysis because it’s too easy to lose observations." -- Hadley Wickham & Garrett Grolemund, R for Data Science.
+
+In contrast to `inner_join()`, `left_join()`, `right_join()`, and `full_join()` are called *outter joins*. You might have wondered, after learning about `inner_join()` which in effect takes an intersection of the data somehow, whether there is a join operation that keeps everything, since `left_join()` filters out from the right table and `right_join()` filters out from the left table? There is, and it is called `full_join()`:
+
+```{r echo = T}
+monthlyActiveComparisonInner <- full_join(monthlyActive2020,
+                                          monthlyActive2019,
+                                          by = 'wiki')
+```
+
+
+```{r echo = T}
+dim(monthlyActiveComparisonInner)
+dim(monthlyActiveComparison)
+```
+
+```{r echo = T}
+sum(is.na(monthlyActiveComparisonInner$monthlyActive2019))
+sum(is.na(monthlyActiveComparisonInner$monthlyActive2020))
+```
+There is something that we have learned about our data now. Remember how I thought the following:
+
+> But I was incorrectly assuming - incorrectly only because I did not check - that the fact that there are more observations present in the later dataset implies that it at the same time encompasses *everything* found in the former dataset.
+
+Well, now we are sure that `monthlyActive2020` has all the Wikipedias found in `monthlyActive2019`! Because otherwise, following a `full_join()` operation, it would not be possible to observe `0 NAs` after `sum(is.na(monthlyActiveComparisonInner$monthlyActive2020))`!
+
+**Note.** Playing with joins across the tables that you are still inspecting, trying to learn about their characteristics as much as you can, while performing small *post hoc* tricks and checks like what I am doing here, is a very good way to get know your data before even entering the EDA phase. I call it *Exploratory Data Wrangling* (EDW).
+
+There is a class of join operations that we call *filtering joins*: `semi_join()` and `anti_join()`. They are very useful indeed. Back to my dilemma, say I want to find out what Wikipedias from `monthlyActive2020` are present in `monthlyActive2019`:
+
+```{r echo = T}
+monthlyActive2020_2019 <- semi_join(monthlyActive2020, 
+                                    monthlyActive2019, 
+                                    by = "wiki")
+```
+
+Now:
+
+```{r echo = T}
+dim(monthlyActive2020_2019)
+dim(monthlyActive2019)
+sum(monthlyActive2020_2019$wiki %in% monthlyActive2019$wiki)
+```
+And then we have `anti_join()`, the complement of `semi_join()`:
+
+```{r echo = T}
+monthlyActive2019_2020 <- anti_join(monthlyActive2020, 
+                                    monthlyActive2019, 
+                                    by = "wiki")
+monthlyActive2019_2020
+```
+And finally we've found the four observations in `monthlyActive2020` that are not present in `monthlyActive2019`.
+
+#### 1.4 Data Wrangling Example: a trick with `anti_join()`
+
+Let me show you something really interesting and useful. Consider `monthlyActive2020`:
+
+```{r echo = T}
+head(monthlyActive2020)
+```
+
+What if one would want to compare the number of active monthly editors in each pair of Wikipedias? Look:
+
+```{r echo = T}
+wikis <- monthlyActive2020$wiki
+cmpData <- lapply(wikis, function(x) {
+  ltab <- filter(monthlyActive2020, wiki == x)
+  tab <- anti_join(monthlyActive2020, ltab, by = "wiki")
+  tab$wiki2 <- ltab$wiki
+  tab$monthlyActive2020_2 <- ltab$monthlyActive2020
+  return(tab)
+})
+cmpData <- reduce(cmpData, rbind)
+head(cmpData)
+```
+
+But there is one problem with this approach: it produces duplicates...
+Let's make a new key, `uniquePair`, which is an example of what Wickham and Grolemund call *"a surrogate key"* in their book:
+
+```{r echo = T}
+cmpData$uniquePair <- apply(cbind(cmpData$wiki, cmpData$wiki2),
+                            1,
+                            function(x) {
+                              canonical <- sort(x)
+                              if (x[1] == canonical[1] & x[2] == canonical[2]) {
+                                return(paste(x, collapse = "-"))
+                                } else {
+                                  return(paste(x[2], x[1], sep = "-"))
+                                  }
+                              })
+w <- which(duplicated(cmpData$uniquePair))
+# - N.B. If length(w) == 0, then cmpData[-w, ] deletes everything...  
+if (length(w) > 1) {
+  cmpData <- cmpData[-w, ]
+}
+```
+
+Now the duplicates are gone and the Analyst can proceed by performing pair-wise comparisons of Wikipedias.
+
+One more thing: `reduce()` with `cbind()` that we have used many times before seems to be slow. Here's a preview of the `{data.table`} package and its super-useful and super-fast `rbindlist()` function:
+
+- Once again, let's create the `cmpData` list:
+
+```{r echo = T}
+wikis <- monthlyActive2020$wiki
+cmpData <- lapply(wikis, function(x) {
+  ltab <- filter(monthlyActive2020, wiki == x)
+  tab <- anti_join(monthlyActive2020, ltab, by = "wiki")
+  tab$wiki2 <- ltab$wiki
+  tab$monthlyActive2020_2 <- ltab$monthlyActive2020
+  return(tab)
+})
+```
+
+- How much time does `reduce(cmpData, rbind)` take? 
+
+```{r echo = T}
+system.time(reduce(cmpData, rbind))
+```
+
+- And how much time does `data.table::rbindlist(cmpData)` take?
+
+```{r echo = T, message = F, warning = F}
+library(data.table)
+system.time(rbindlist(cmpData))
+```
+The [documentation](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/proc.time) says:
+
+> The definition of ‘user’ and ‘system’ times is from your OS. Typically it is something like
+The ‘user time’ is the CPU time charged for the execution of user instructions of the calling process. The ‘system time’ is the CPU time charged for execution by the system on behalf of the calling process.
+
+### 2 The $\chi^2$ distribution and the $\chi^2$-test
+
+#### 2.1 The $\chi^2$ distribution
+
+*Theory:* say X follows a Standard Normal Distribution ($\mathcal{N}(0,1)$). Take *k* = 3 such variables, square them, sum up the squares, and repeat the experiment 100,000 times.
+
+``` {r echo = T}
+stdNormals3 <- sapply(seq(1, 100000), function(x) {
+  sum((rnorm(3, mean = 1, sd = 1))^2)
+})
+```
+
+**Q:** How are these sums of standard normal distributions distributed?
+
+``` {r echo = T}
+# set plot parameters
+hist(stdNormals3, 50, main = "k = 3",
+     xlab = "Sums of squared Gaussians",
+     ylab = "Frequency",
+     col = "steelblue")
+```
+Repeat for k = 30:
+
+``` {r echo = T}
+stdNormals30 <- sapply(seq(1,100000), function(x) {
+  sum((rnorm(30, mean = 1, sd = 1))^2)
+})
+hist(stdNormals30, 50, main = "k = 30",
+     xlab = "Sums of squared Gaussians",
+     ylab = "Frequency",
+     col = "steelblue")
+```
+
+Here it is: the sum of squared IID random variables - each of them distributed as $\mathcal{N}(0,1)$ - follows a $\chi^2$ distribution.
+
+``` {r echo=T}
+par(mfrow = c(1, 2))
+curve(dchisq(x, 3), 
+      from = 0, to = 40, 
+      main = "k = 3", 
+      col = "blue",
+      xlab = "x", ylab = "Density")
+curve(dchisq(x, 30), 
+      from = 0, to = 120, 
+      main = "k = 30", 
+      col = "blue",
+      xlab = "x", ylab = "Density")
+```
+
+This probability distribution plays a very important role in statistical hypothesis testing; its domain encompasses strictly positive real numbers, and the probability density is given by:
+
+$$f(x;k) = \begin{cases}{2}{\frac{x^{(k/2-1)e^{-x/2}}}{2^{k/2}\Gamma(\frac{k}{2})}}, \:\:{for}\:\ x > 0;\\{0,\:\:\:\:\:\:\:\:\:\:\:\:\:\:\:\:\:\:\:\: otherwise}\end{cases}$$
+
+where $\Gamma$ is the gamma function, with a property of $\Gamma(n)=(n-1)!$ for any positive integer $n$.
+
+#### 2.1 The $\chi^2$-test
+
+Assume the following: an urn contains white, blue, and red balls in proportion of 5:3:2, and we draw a sample of size `n = 100` from the urn. Thus,
+
+``` {r echo=T}
+n <- 100
+```
+
+Our task is to determine whether the sample reflects the hypothesized distribution of balls in the urn. Let's simulate this experiment in R:
+
+``` {r echo=T}
+# Step 1: Population parameters (probabilities)
+populationP <- c(.5, .3, .2)
+expectedCounts <- n * populationP
+expectedCounts
+```
+
+Of course, 50 white, 30 blue, and 20 red balls is the expected outcome of the experiment, given the population parameters. We are dealing with a *multinomial* distribution here, obviously. Let's start sampling from it, by first providing the population parameters to it:
+
+``` {r echo=T}
+# Step 2: Sampling
+# random draw from a multinomial distribution of three events:
+sample <- as.numeric(rmultinom(1, 100, prob = populationP))
+sample
+```
+
+Does this sample deviates significantly from the expected counts (i.e. does our "theory" of population parameters fit the empirical data well)? We use the $\chi^2$-test to check it out:
+
+``` {r echo=T}
+# Step 3: Chi-Square Statistic:
+chiSq <- sum(((sample - expectedCounts)^2)/expectedCounts)
+print(paste0("The chi-Square statistic is: ", chiSq))
+df <- 3 - 1 # k == 3 == number of events
+print(paste0("Degrees of freedom: ", df))
+sig <- pchisq(chiSq, df, lower.tail = F) # upper tail
+print(paste0("Type I Error probability is: ", sig))
+print(paste0("Type I Error < .05: ", sig < .05))
+```
+
+The $\chi^2$ statistic, let us refresh our Stats 101, would be...
+
+$$\chi^2 = \sum_{i=1}^{n}\frac{(Observed\:Counts_i - Expected\:Counts_i)^2}{Expected\: Counts_i}$$
+
+And the probability that we are about to commit a $Type\:I\: Error$ (i.e. accepting that the Observed Counts are different from the Expected Counts while in the population they are not) must be assessed from the cumulative  $\chi^2$ distribution, provided by `pchisq()` in R: `pchisq(chiSq, df, lower.tail = F)` - going for the upper tail to figure out how improbable would a particular test value be from a $\chi^2$ distribution with `df` degrees of freedom.
+
+In this case, the conclusion is: the obtained sample really looks like it comes from the specified population.
+
+Now with a sample from a different distribution:
+
+``` {r echo = T}
+# random draw from a multinomial distribution of three events:
+populationP <- c(.3, .3, .4)
+sample <- as.numeric(rmultinom(1, 100, prob = populationP))
+sample
+```
+
+``` {r echo=T}
+# Step 3: Chi-Square Statistic:
+expectedCounts <- populationP * 100
+chiSq <- sum(((sample - expectedCounts)^2)/expectedCounts)
+print(paste0("The chi-Square statistic is: ", chiSq))
+df <- 3 - 1 # k == 3 == number of events
+print(paste0("Degrees of freedom: ", df))
+sig <- pchisq(chiSq, df, lower.tail = F) # upper tail
+print(paste0("Type I Error probability is: ", sig))
+print(paste0("Type I Error < .05: ", sig < .05))
+```
+
+To perform this basic hypothesis test in R, use the `chisq.test` function:
+
+``` {r echo = T}
+# Testing the independence of rows and columns
+chisq.test(x = sample, 
+           y = populationP)
+```
+
+#### 2.3 Active Monthly Editors in Wikipedias: 2019 vs 2020
+
+**Q.** Is the distribution of the numbers of Active Monthly Editors in Wikipedias in 2020 different than it was in 2019?
+
+We will focus only on Wikipedias with `>=50` active monthly editors. Assume that the expected (theoretical, population) distribution is the one observed in 2019:
+
+```{r echo = T}
+mac <- monthlyActiveComparison %>% 
+  filter(monthlyActive2020 >= 50|monthlyActive2019 >= 50)
+colnames(mac)[2:3] <- c('Observed', 'Expected')
+head(mac)
+```
+
+
+```{r echo = T}
+mac$populationP <- mac$Expected/sum(mac$Expected)
+mac$expectedCounts <- mac$populationP * sum(mac$Observed)
+chiSq <- sum(((mac$Observed - mac$expectedCounts)^2)/mac$expectedCounts)
+print(paste0("The chi-Square statistic is: ", chiSq))
+df <- dim(mac)[1] - 1 # k == 3 == number of events
+print(paste0("Degrees of freedom: ", df))
+sig <- pchisq(chiSq, df, lower.tail = F) # upper tail
+print(paste0("Type I Error probability is: ", sig))
+print(paste0("Type I Error < .05: ", sig < .05))
+```
+
+Let's check w. `chisq.test()`:
+
+```{r echo = T}
+populationP <- mac$Expected/sum(mac$Expected)
+chisq.test(x = mac$Observed, 
+           p = populationP)
+```
+
+### Further Readings
+
+- [$\chi^2$ Distribution, from Introduction to Econometrics with R](https://www.econometrics-with-r.org/2-1-random-variables-and-probability-distributions.html#the-chi-squared-distribution)
+- [Comparing frequencies: Chi-Square tests, from Stats with R, Manny Gimond](https://mgimond.github.io/Stats-in-R/ChiSquare_test.html)
+- [Grinstead and Snell’s Introduction to Probability (NOTE: The Bible of Probability Theory)](https://math.dartmouth.edu/~prob/prob/prob.pdf). Definitely not an introductory material, but everything from Chapter 1. and up to Chapter 9. at least is (a) super-interesting to learn, (b) super-useful in Data Science, and (c) most Data Science practitioners already know it (or should know it). Enjoy!
+- [Chapter 13, Relational data, Hadley Wickham & Garrett Grolemund](https://r4ds.had.co.nz/relational-data.html)
+
+
+### Some Introductory Video Material
+
+- [Khan Academy: Chi-square goodness-of-fit tests](https://www.khanacademy.org/math/statistics-probability/inference-categorical-data-chi-square-tests#chi-square-goodness-of-fit-tests)
+
+### R Markdown
+
+[R Markdown](https://rmarkdown.rstudio.com/) is what I have used to produce this beautiful Notebook. We will learn more about it near the end of the course, but if you already feel ready to dive deep, here's a book: [R Markdown: The Definitive Guide, Yihui Xie, J. J. Allaire, Garrett Grolemunds.](https://bookdown.org/yihui/rmarkdown/) 
+
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+

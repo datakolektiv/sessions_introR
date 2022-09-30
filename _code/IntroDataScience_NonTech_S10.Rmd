@@ -1,0 +1,691 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Session10
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Session 10: Working with a local RDBS from {dplyr} and {DBI} + t-test for unpaired samples 
+
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### What do we want to do today?
+
+Serious data wrangling with {dplyr}. What Relational Databases (RDBS) are and how do we connect to them? Prerequisites: installing [MariaDB](https://mariadb.org/) on your local machine. A crash course in SQL: so similar to {dplyr}.
+
+
+### 0. Prerequisits
+
+  1. [Download MariaDB](https://downloads.mariadb.org/): pick version 10.5.9 from the current stable series: use [this link](https://downloads.mariadb.org/interstitial/mariadb-10.5.9/winx64-packages/mariadb-10.5.9-winx64.msi/from/https%3A//mirror.one.com/mariadb/) to download the Maria DB MSI package for Windows 10.
+  
+  2. Double-click `mariadb-10.5.9-winx64` once the download is finished.
+  
+  3. Follow the instructions here: [Installing MariaDB MSI Packages on Windows](https://mariadb.com/kb/en/installing-mariadb-msi-packages-on-windows/) once the installation process begins. Just go for the defaults, e.g. leave the *Database instance* feature selected to create a database instance. **Please do read the instructions carefully.** Write down or memorize your *root password*; Options: **do use** `UTF8` as default server's character set when asked; **Uncheck:** Enable access from remote machines for 'root' user; `Install as service`: **yes**, `Enable networking`: **yes**, leave the TCP port as is.       
+  
+  4. **Install.**
+  
+  5. Install {dbplyr}: `install.packages("dbplyr")`.
+  
+  6. Install {RMariaDB}: `install.packages("RMariaDB")`.
+  
+  7. Open **MySQL Client**. You will be prompted for a root password.
+  
+  8. Create database: `CREATE DATABASE datakolektiv;`
+  
+  9. Create user: `CREATE USER <YourUsername>@localhost IDENTIFIED BY '<YourPassword>';` (**NOTE.** This is a new password that you create for the new user, not the root password).
+  
+  10. Grant all rights to user: `GRANT ALL PRIVILEGES ON *.* TO <YourUsername>@localhost;`.
+  
+  11. Activate privileges: `flush privileges;`.
+
+  12. Exit: `exit`.
+  
+  13. Install `nycflights13`: `install.packages('nycflights13')`
+  
+```{r echo = T, message = F, warning = F}
+library(tidyverse)
+library(dbplyr)
+library(RMariaDB)
+```
+
+### 1. Working with a local RDBS from {DBI}/{dplyr}/{dbplyr}
+
+#### 1.1 {DBI} and {RMariaDB}
+
+[{DBI}](https://db.rstudio.com/dbi/) is a package to work with various databases systems from R. The essential advantage of {DBI} is that it provides a *unified interface* to work with different database systems. The *drivers* - pieces of software that implement *protocols*, sets of rules that control the communication with a specific database - are provided by other, databases system specific packages, like [{RMardiaDB}](https://github.com/r-dbi/RMariaDB), [{RMySQL}](https://github.com/r-dbi/RMySQL), [{RPostgreSQL}](https://cran.r-project.org/web/packages/RPostgreSQL/index.html), and similar.
+
+We begin by connecting to our local MariaDB instance: we establish a *connection* and present ourselves as a particular database user:  
+
+```{r echo = T}
+drv <- RMariaDB::MariaDB()
+con <- RMariaDB::dbConnect(drv, 
+  user = "goransm",
+  dbname = "datakolektiv",
+  host = "localhost",
+  port = 3306,
+  password = rstudioapi::askForPassword("Database password:")
+)
+```
+
+The `drv <- RMariaDB::MariaDB()` instantiates an object of the `MariaDBDriver` class, which is used in the `RMariaDB::dbConnect()` call as its first argument. The `RMariaDB::dbConnect()` call also passes on the `user` argument, the database for which the user has permissions as `dbname`, the `host` which is for local instances always `localhost`, the `port` to which the database system listens to, and finally invokes `rstudioapi::askForPassword("Database password:")` - a nice piece of RStudio functionally - to provide an interactive password prompt.
+
+To list all tables in the `datakolektiv` database:
+
+```{r echo = T}
+RMariaDB::dbListTables(con)
+```
+... and in the beginning there are none, of course. We will use `DBI::dbWriteTable()` to copy the `mtcars` dataframe to the `datakolektiv` database:
+
+```{r echo = T}
+DBI::dbWriteTable(con, "mtcars", mtcars)
+RMariaDB::dbListTables(con)
+```
+And it is that easy. Now, we want to send our first SQL query to `datakolektiv` and pick up its result back in our R environment:
+
+```{r echo = T, warning = F}
+res <- DBI::dbSendQuery(con,
+                        statement = "SELECT * FROM mtcars;")
+mtcarsFrame <- DBI::dbFetch(res)
+DBI::dbClearResult(res)
+print(mtcarsFrame)
+```
+
+Step by step:
+
+- `res <- DBI::dbSendQuery(con, statement = "SELECT * FROM mtcars;")`: using the `con` connection to `datakolektiv`, send the following SQL statement: `"SELECT * FROM mtcars;"`, which selects everything in the `mtcars` table of the `datakolektiv` database;
+- `mtcarsFrame <- DBI::dbFetch(res)`: **fetch** the result `res`, which means: pick up the result set obtained from the SQL query execution in `datakolektiv` and load it into the `mtcarsFrame` object in the R environment;
+- `DBI::dbClearResult(res)`: **very important** especially for large result sets - it frees all resources (local and remote) associated with a result set;
+- `print(mtcarsFrame)`: just print the SQL query results which is now stored in the R object `mtcarsFrame`.
+
+We could have used `DBI::dbReadTable()` instead of sending the `"SELECT * FROM mtcars;"` SQL query to the database. They both return everything found in the specified table:
+
+```{r echo = T, warning = F}
+DBI::dbReadTable(con, 'mtcars')
+```
+
+Or the {RMariaDB} version, `RMariaDB::dbReadTable(con, 'mtcars')`:
+
+```{r echo = T, warning = F}
+RMariaDB::dbReadTable(con, 'mtcars')
+```
+
+Let's take a look at the following simple SQL aggregation to demonstrate how similar {dplyr} and SQL really are:
+
+```{r echo = T, warning = F}
+res <- dbSendQuery(con,
+                      statement = "SELECT cyl, AVG(disp) AS avg_disp, AVG(drat) AS avg_drat 
+                                      FROM mtcars 
+                                      GROUP BY cyl;")
+result <- dbFetch(res)
+dbClearResult(res)
+print(result)
+```
+
+Step by step:
+
+- we have first explained what do we want *selected* from the table: `cyl, AVG(disp) AS avg_disp, AVG(drat) AS avg_drat` following the `SELECT` keyword (**note:** SQL keywords are really case insensitive, `select` would also do), defining new column names in the result set by using `AS`;
+- then we have explained in which table are we looking for the data: `FROM mtcars`; 
+- and finally explained that we need to `GROUP BY cyl`. 
+
+In {dplyr}, that would be:
+
+```{r echo = T, message = F}
+mtcars %>% 
+  select(cyl, disp, drat) %>% 
+  group_by(cyl) %>% 
+  summarise(avg_disp = mean(disp), 
+            avg_drat = mean(drat))
+```
+
+Finally, let's remove the `mtcars` table from the `datakolektiv` database in MariaDB:
+
+```{r echo = T, message = F}
+RMariaDB::dbRemoveTable(con, "mtcars")
+RMariaDB::dbListTables(con)
+```
+Empty. Disconnect (do not forget to disconnect!):
+
+```{r echo = T}
+RMariaDB::dbDisconnect(con)
+```
+
+
+#### 1.2 {dplyr}
+
+Now, what is interesting is that {dplyr}, supported by [{dbplyr}](https://dbplyr.tidyverse.org/) - its database backend - can be used to send queries to a database which are silently, under the hood translated from the native {dplyr} sintax into SQL queries!
+
+The following examples are from RStudio's [Using dplyr with databases](https://db.rstudio.com/dplyr/). Connect:
+
+```{r echo = T}
+drv <- RMariaDB::MariaDB()
+con <- dbConnect(drv, 
+  user = "goransm",
+  dbname = "datakolektiv",
+  host = "localhost",
+  port = 3306,
+  password = rstudioapi::askForPassword("Password:")
+)
+```
+
+Use `copy_to()` to copy the `flights` dataframe from `nycflights13` to `datakolektiv` in MariaDB (this might take some time):
+
+```{r echo = T}
+copy_to(dest = con, 
+        df = nycflights13::flights, 
+        name = "flights",
+        temporary = FALSE,
+        indexes = list(c("year", "month", "day"),
+                       "carrier",
+                       "tailnum",
+                       "dest"
+                       )
+        )
+```
+
+We will discuss the `indexes` parameter later. For now, let's just check if `flights` are now found in `datakolektiv`:
+
+```{r echo = T, warning = F}
+res <- dbSendQuery(con,
+                      statement = "SHOW TABLES;")
+result <- dbFetch(res)
+dbClearResult(res)
+print(result)
+```
+
+```{r echo = T, warning = F}
+res <- dbSendQuery(con,
+                      statement = "DESCRIBE flights;")
+result <- dbFetch(res)
+dbClearResult(res)
+print(result)
+```
+
+It's there, definitely. To work with a table in a RDBS from {dplyr}, we need to use `tbl()` to make a reference to it as an external data source:
+
+```{r echo = T}
+flights_db <- tbl(con, "flights")
+```
+
+And now we can send a {dplyr} "query" to a database, e.g:
+
+```{r echo = T}
+flights_db %>% 
+  select(year:day, dep_delay, arr_delay) %>% 
+  head(10)
+```
+Compute the mean `dep_time` grouped by
+
+```{r echo = T, warning = F}
+flights_db %>% 
+  group_by(dest) %>%
+  summarise(delay = mean(dep_time))
+```
+
+Something that we need to be aware of - a great advantage of working with RDBS from {dplyr} and R in fact - is that our code is *lazy evaluated*. Let's analyze the following {dplyr} pipeline:
+
+```{r echo = T}
+tailnum_delay_db <- flights_db %>% 
+  group_by(tailnum) %>%
+  summarise(
+    delay = mean(arr_delay),
+    n = n()
+  ) %>% 
+  arrange(desc(delay)) %>%
+  filter(n > 100)
+```
+
+When we execute a code like this, *nothing* happens in the database. No action is taken, no processing beings: because the structure of the code simply defines what *needs to happen*, but does not invoke any *direct action*: the result `tailnum_delay_db` is not used in R in any way!
+
+See how {dplyr} translates to SQL:
+
+```{r echo = T, warning = F}
+tailnum_delay_db %>% show_query()
+```
+This ^^ is exactly the SQL query that will be run in MariaDB to perform the work defined by the {dplyr} pipeline that defines `tailnum_delay_db` above. From everything that you already now about R you would probably think that `tailnum_delay_db` has a `data.frame` class. Look:
+
+```{r echo = T}
+class(tailnum_delay_db)
+```
+`tbl_lazy` :). Now we `collect()` our `tailnum_delay_db` and only that triggers an action in MariaDB:
+
+```{r echo = T, warning = F}
+tailnum_delay <- tailnum_delay_db %>% collect()
+tailnum_delay
+```
+
+We do not need the `flights` table anymore:
+
+```{r echo = T, warning = F}
+RMariaDB::dbRemoveTable(con, 'flights')
+RMariaDB::dbListTables(con)
+```
+and begin using `mtcars` again:
+
+```{r echo = T, warning = F}
+RMariaDB::dbWriteTable(con, 'mtcars', mtcars)
+```
+
+Aggregation by sending a SQL query directly:
+
+```{r echo = T, warning = F}
+res <- dbSendQuery(con,
+                      statement = "SELECT cyl, AVG(disp) AS avg_disp, AVG(drat) AS avg_drat 
+                                      FROM mtcars 
+                                      GROUP BY cyl;")
+result <- dbFetch(res)
+dbClearResult(res)
+print(result)
+```
+
+Now make a reference to `mtcars` to use {dplyr}:
+
+```{r echo = T, warning = F}
+mtcars_db <- tbl(con, 'mtcars')
+```
+
+The same aggregation from {dplyr}:
+
+```{r echo = T, warning = F}
+mtcars_db %>% select(cyl, disp, drat) %>% 
+  group_by(cyl) %>% 
+  summarise(avg_disp = mean(disp), 
+            avg_drat = mean(drat))
+```
+
+Remove `mtcars` and disconnect:
+
+```{r echo = T, warning = F}
+RMariaDB::dbRemoveTable(con, 'mtcars')
+RMariaDB::dbDisconnect(con)
+```
+
+
+### 2. {dplyr}, SQL, indexes, and relations
+
+Connect:
+
+```{r echo = T}
+drv <- RMariaDB::MariaDB()
+con <- dbConnect(drv, 
+  user = "goransm",
+  dbname = "datakolektiv",
+  host = "localhost",
+  port = 3306,
+  password = rstudioapi::askForPassword("Password:")
+)
+```
+
+Copy `flights` and `planes` from `nycflights13` to `datakolektiv`, this time using `RMariaDB::dbWriteTable()` in place of `dplyr::copy_to()` (this might take some time):
+
+```{r echo = T}
+RMariaDB::dbWriteTable(con,
+                       name = "flights",
+                       value = nycflights13::flights)
+RMariaDB::dbWriteTable(con, 
+                       "planes",
+                       nycflights13::planes)
+
+```
+
+Remember how we have used `indexes` in our `dplyr::copy_to()` call previously? What are database *indexes*?
+
+> A database index is a data structure that improves the speed of data retrieval operations on a database table at the cost of additional writes and storage space to maintain the index data structure. Indexes are used to quickly locate data without having to search every row in a database table every time a database table is accessed. Indexes can be created using one or more columns of a database table, providing the basis for both rapid random lookups and efficient access of ordered records. Source: [Database index, from English Wikipedia](https://en.wikipedia.org/wiki/Database_index)
+
+Indexing a table in a RDBS is a pretty advanced topic. We will discuss more of it in our Session.
+
+In Session 11, next week, we will see how the powerful {data.table} R package uses indexes in R to speed up data processing for orders of magnitude in comparison to base R dataframes or dplyr tibbles. For now, indexing `flights` in `datakolektiv` with the following set of SQL queries:
+
+```{r echo = T, warning = F}
+# indexes = list(c("year", "month", "day"),
+#                "carrier", "tailnum", "dest")
+query <- c('CREATE INDEX ixcarrier ON flights(carrier)', 
+           'CREATE INDEX ixtailnum ON flights(tailnum);',
+           'CREATE INDEX ixdest ON flights(dest);')
+lapply(query, function(x) {
+  res <- DBI::dbSendQuery(con, x)
+  DBI::dbClearResult(res)
+})
+query <- 'SHOW INDEX FROM flights;'
+res <- DBI::dbSendQuery(con, query)
+result <- DBI::dbFetch(res)
+DBI::dbClearResult(res)
+print(result)
+```
+Now the composite index over `year`, `month`, and `day`:
+
+```{r echo = T}
+# indexes = list(c("year", "month", "day"),
+#                "carrier", "tailnum", "dest")
+query <- 'CREATE INDEX ixdmy ON flights(year, month, day)'
+res <- DBI::dbSendQuery(con, query)
+DBI::dbClearResult(res)
+query <- 'SHOW INDEX FROM flights;'
+res <- DBI::dbSendQuery(con, query)
+result <- DBI::dbFetch(res)
+DBI::dbClearResult(res)
+print(result)
+```
+
+So how does `flights` look like in `datakolektiv`?
+
+```{r echo = T}
+query <- 'DESCRIBE flights'
+res <- DBI::dbSendQuery(con, query)
+result <- DBI::dbFetch(res)
+DBI::dbClearResult(res)
+print(result)
+```
+
+And what do we have in `planes`?
+
+```{r echo = T}
+query <- 'DESCRIBE planes'
+res <- DBI::dbSendQuery(con, query)
+result <- DBI::dbFetch(res)
+DBI::dbClearResult(res)
+print(result)
+```
+Interesting, for each flight in `flights` we know the tail number `tailnum` of the plane which is also present in `planes`. I am a curious Data Scientist and I want to see what are the technical characteristics a plane that flew each flight in `flights`, so I need to join them, right? {dplyr}:
+
+```{r echo = T}
+flights_db <- tbl(con, "flights")
+planes_db <- tbl(con, "planes")
+flights_relations <- dplyr::left_join(flights_db, 
+                                      planes_db, 
+                                      by = "tailnum")
+```
+
+So... what is `flights_relations`?
+
+```{r echo = T}
+class(flights_relations)
+```
+Of course, `collect()`:
+(**note**: please be patient)
+
+```{r echo = T}
+flightsFrame <- flights_relations %>% 
+  collect()
+head(flightsFrame)
+```
+
+How would that `left_join()` look in SQL? Well, a bit clumsy in my SQL code because I needed to consider the fact that `tailnum` is present in both `flights` and `planes` which would then cause a duplicated column name in the result set, but after some struggle...
+(**note**: please be patient)
+
+```{r echo = T}
+query <- 'CREATE TABLE flightsframe
+            AS (
+              SELECT flights.flight,
+                     flights.origin,
+                     flights.dest,
+                     flights.air_time,
+                     flights.distance,
+                     planes.year,
+                     planes.type,
+                     planes.manufacturer, 
+                     planes.model, 
+                     planes.engines,
+                     planes.seats, 
+                     planes.speed,
+                     planes.engine
+              FROM flights LEFT JOIN planes USING(tailnum));'
+res <- DBI::dbSendQuery(con, query)
+DBI::dbClearResult(res)
+```
+
+Let's take a look at the resulting `flightsframe` table in `datakolektiv`:
+
+```{r echo = T, warning = F}
+query <- 'DESCRIBE flightsframe'
+res <- DBI::dbSendQuery(con, query)
+result <- DBI::dbFetch(res)
+DBI::dbClearResult(res)
+print(result)
+```
+
+And then if we want to continue in RAM processing in R:
+
+```{r echo = T, warning = F}
+rm(flights_frame)
+flights_frame <- RMariaDB::dbReadTable(con, 'flightsframe')
+head(flights_frame)
+```
+
+Clear all; disconnect:
+
+```{r echo = T}
+RMariaDB::dbRemoveTable(con, 'flights')
+RMariaDB::dbRemoveTable(con, 'planes')
+RMariaDB::dbRemoveTable(con, 'flightsframe')
+RMariaDB::dbDisconnect(con)
+```
+
+### 3. t-test for unpaired samples
+
+In Lab02 we have introduced the t-test to test if a sample mean is really obtained from a population with some predefined, known mean. The t-test can be used in various settings and now we will see how to use it to compare if two sample means are drawn from the same or different populations, i.e. is their difference statistically significant or not.
+
+The specific case that we will consider is the t-test for *unpaired samples*. Imagine we test a group of men and women on the same task and wish to compare their mean performances. Obviously, no man from the first group could have also been a member of the second group, and *vice versa*, no woman from the second group could also have been a member of the first group. This is an example of a *between-subjects* measurement, where there are two sets of measurements obtained from some "objects" of measurement that are not related nor interchangeable in any way. Imagine if we test a group of men on two related but specific tasks, and we want to compare their mean performance in the first test against their mean performance in the second test. Now, each member of the study sample provides a performance score twice: once in the first and then again in the second test situation. In that case, to test whether the mean performances are any different, we would use a *paired samples t-test* - which we will not discuss today - and the measure is said to be *within-subjects*.
+
+```{r echo = T}
+table(flights_frame$model) %>% 
+  as.data.frame(stringsAsFactors = F) %>% 
+  arrange(desc(Freq)) %>% 
+  head(10)
+```
+This is the list of airplane models that are most frequently observed in `flights_frame`. Let's focus on the two most frequently observed models and ask there are any differences on the `air_time` variable between the flights performed by `A320-232` and flights performed by `EMB-145LR`:
+
+```{r echo = T}
+models <- c('A320-232', 'EMB-145LR')
+ttestTable <- flights_frame %>% 
+  select(distance, air_time, model) %>% 
+  filter(model %in% models) %>% 
+  na.omit
+head(ttestTable)
+```
+
+How many flights, per airplane model, are selected?
+
+```{r echo = T}
+table(ttestTable$model)
+```
+This is not good. In a t-test setting, we would like to have unpaired samples of at least approximately same size. Here goes a bit of sampling magic:
+
+```{r echo = T}
+props <- as.numeric(
+  table(ttestTable$model)/sum(table(ttestTable$model))
+)
+props
+```
+It is now easy, just sample the larger class in a proportion of the smaller one, and the smaller class in a proportion of the larger one:
+
+```{r echo = T}
+ttestTable$select <- sapply(ttestTable$model, function(x) {
+  if (x == 'EMB-145LR') {
+    rbinom(1, 1, props[1])
+  } else {
+    rbinom(1, 1, props[2])
+  }
+})
+table(ttestTable$select)
+```
+We just need to pick-up the `1s` on `ttestTable$select`:
+
+```{r echo = T}
+ttestTable <- ttestTable[ttestTable$select == 1, ]
+table(ttestTable$model)
+```
+Almost there. The t-test now!
+
+#### 3.1 How to perform a t-test for unpaired samples in R
+
+
+```{r echo = T}
+t.test(x = ttestTable$distance[ttestTable$model == "A320-232"],
+       y = ttestTable$distance[ttestTable$model == "EMB-145LR"], 
+       alternative = "two.sided", 
+       var.equal = T)
+```
+
+Note the `var.equal = T` argument in the `t.test()` call. One of the assumptions of the t-test is that the measure variances in both groups *are equal*, which is almost certainly not the case here. But we have a bigger problem: the t-test is meant for normally distributed data... 
+
+```{r echo = T}
+ttestPlotFrame <- ttestTable %>% 
+  select(model, distance)
+ggplot(ttestPlotFrame, 
+       aes(x = distance,
+           group = model,
+           fill = model)) + 
+  geom_density(alpha = .5, color = "black") + 
+  ggtitle("NYC Flights Dataset") + 
+  scale_fill_manual(values = c('deepskyblue', 'darkorange')) + 
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = .5, size = 9)) + 
+  theme(panel.grid = element_blank()) + 
+  theme(panel.border = element_blank()) + 
+  theme(legend.title = element_text(size = 8)) + 
+  theme(legend.text = element_text(size = 8))
+```
+Not even remotely:
+
+```{r echo = T}
+ks.test(ttestTable$distance[ttestTable$model == "A320-232"], 
+        y = "pnorm")
+```
+
+```{r echo = T}
+ks.test(ttestTable$distance[ttestTable$model == "EMB-145LR"], 
+        y = "pnorm")
+```
+
+#### 3.2 Normally distributed data in `iris`
+
+So now we now how to use a t-test in an unpaired samples setting. Let's go for some at least approximately normally distributed data. 
+
+```{r echo = T}
+head(iris)
+```
+
+```{r echo = T}
+shapiro.test(iris$Sepal.Length[iris$Species == "setosa"])
+```
+
+```{r echo = T}
+shapiro.test(iris$Sepal.Length[iris$Species == "versicolor"])
+```
+
+```{r echo = T}
+ggplot(iris %>% 
+         filter(Species != 'virginica'), 
+       aes(x = Sepal.Length,
+           group = Species,
+           fill = Species)) + 
+  geom_density(alpha = .5, color = "black") + 
+  ggtitle("Iris Dataset") + 
+  scale_fill_manual(values = c('deepskyblue', 'darkorange')) +
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = .5, size = 9)) + 
+  theme(panel.grid = element_blank()) + 
+  theme(panel.border = element_blank()) + 
+  theme(legend.title = element_text(size = 8)) + 
+  theme(legend.text = element_text(size = 8))
+```
+Boxplot:
+
+```{r echo = T}
+ggplot(iris %>% 
+         filter(Species != 'virginica'), 
+       aes(x = Species,
+           y = Sepal.Length,
+           group = Species,
+           fill = Species)) + 
+  geom_boxplot() + 
+  ggtitle("Iris Dataset") + 
+  scale_fill_manual(values = c('deepskyblue', 'darkorange')) +
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = .5, size = 9)) + 
+  theme(panel.grid = element_blank()) + 
+  theme(panel.border = element_blank()) + 
+  theme(legend.title = element_text(size = 8)) + 
+  theme(legend.text = element_text(size = 8))
+```
+It definitely looks like there is a difference, the data seem to follow a normal distribution...
+
+```{r echo = T}
+t.test(x = iris$Sepal.Length[iris$Species == "setosa"],
+       y = iris$Sepal.Length[iris$Species == "versicolor"], 
+       alternative = "two.sided", 
+       var.equal = T)
+```
+Great. But...
+
+```{r echo = T}
+var(iris$Sepal.Length[iris$Species == "setosa"])
+```
+
+```{r echo = T}
+var(iris$Sepal.Length[iris$Species == "versicolor"])
+```
+It does not look good: the `versicolor` variance on `Sepal.Length` seems to be more than twice large than in the `setosa` group. A correction needs to be applied.
+
+#### 3.3 Welch test: unequal group variances
+
+Change: `var.equal = F` to perform a *Welch test*:
+
+```{r echo = T}
+t.test(x = iris$Sepal.Length[iris$Species == "setosa"],
+       y = iris$Sepal.Length[iris$Species == "versicolor"], 
+       alternative = "two.sided", 
+       var.equal = F)
+```
+
+
+### Further Readings
+
+- [Install MariaDB Tutorial](https://www.mariadbtutorial.com/getting-started/install-mariadb/)
+- [How To Create MariaDB User And Grant Privilege from PhoenixNap](https://phoenixnap.com/kb/how-to-create-mariadb-user-grant-privileges)
+- [Using dplyr with databases, RStudio](https://db.rstudio.com/dplyr/)
+- [{RMariaDB} package](https://github.com/r-dbi/RMariaDB)
+- [w3schools: SQL Tutorial](https://www.w3schools.com/sql/)
+- [Introduction to DBI James Wondrasek, Katharina Brunner, Kirill Müller](https://dbi.r-dbi.org/articles/dbi)
+- [Unpaired Two-Samples T-test in R from STHDA](http://www.sthda.com/english/wiki/unpaired-two-samples-t-test-in-r)
+
+
+### R Markdown
+
+[R Markdown](https://rmarkdown.rstudio.com/) is what I have used to produce this beautiful Notebook. We will learn more about it near the end of the course, but if you already feel ready to dive deep, here's a book: [R Markdown: The Definitive Guide, Yihui Xie, J. J. Allaire, Garrett Grolemunds.](https://bookdown.org/yihui/rmarkdown/) 
+
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+

@@ -1,0 +1,721 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Session07
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Session 07: Introduction to Probability Theory in R. Random Variables + Probability Functions
+ 
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### What do we want to do today?
+
+We are entering the core part of the course with an introduction to Probability Theory and Mathematical Statistics in R! In this Session, we will learn about probability and *probability functions*: why are *discrete* and *continuous random outcomes* different, what is a *statistical experiment*, how to perform *numerical simulations* of statistical experiments in R, and what is the difference between the *Probability Density Function (pdf)*, the *Probability Mass Function (pmf)*, and the *Cumulative Distribution Function (cdf)*... Then we introduce important two important probability distributions: Binomial (discrete) and Normal (i.e. Gaussian, continuous).
+
+
+### 0. Prerequisits
+
+```{r echo = T, message = F, warning = F}
+library(tidyverse)
+set.seed(9999)
+```
+
+The `set.seed(9999)` code will ensure the reproducibility of the numerical simulations that will be run here; to be explained in our session.
+
+### 1. Probability: Theoretical and Experimental
+
+Imagine we toss a fair coin ten times and write down the outcomes as `(H)ead` or `(T)ail` each time:
+
+```{r echo = T}
+tosses <- c('H', 'H', 'T', 'T', 'H', 'T', 'T', 'H', 'T', 'T')
+table(tosses)
+```
+
+In this *statistical experiment* I have made up the results. I told you that we will be tossing a *fair* coin: the one with an equal probability (say: 50/50, for now) to result in `H` or `T`. However, what we have observed is maybe a bit unusual: four `H` and six `T`. Now, is that a fair coin? The answer is: it still might be. 
+
+From my statistical experiment, what is the probability of observing `H` - `P(H)` - and the probability of observing `T` - `P(T)`?
+
+```{r echo = T}
+table(tosses)/length(tosses)
+```
+
+Yes. From our observations, we *estimate* `P(H)` to be `.4` and `P(T)` to be `.6`. However... we have *assumed* already that the coin is fair. Let's try to build statistical experiments by relying on that assumption.
+
+```{r echo = T}
+tosses <- sample(c('H', 'T'), size = 10, replace = TRUE, prob = c(.5, .5))
+table(tosses)
+```
+
+```{r echo = T}
+tosses <- sample(c('H', 'T'), size = 10, replace = TRUE, prob = c(.5, .5))
+table(tosses)
+```
+
+```{r echo = T}
+tosses <- sample(c('H', 'T'), size = 10, replace = TRUE, prob = c(.5, .5))
+table(tosses)
+```
+
+#### 1. A coin, fair or not
+
+Wait - `sample()` does not always return the same result? No, of course not: the story of *random variables* and *random sampling* begins! What we will do next is to perform a large number - say 10000 - of identical statistical experiments of the following form: each time we toss a fair coin - defined by the value of the `prob = c(.5, .5)` argument in our `sample()` call - and record how many times we observe `H` or `T`:
+
+```{r echo = T}
+domain <- c('H', 'T')
+trials = 10
+distribution <- c(.5, .5)
+experiment <- lapply(1:10000, function(x) {
+  sample(x = domain,
+         size = trials,
+         replace = T,
+         prob = distribution)
+  
+})
+experiment <- Reduce(rbind, experiment)
+colnames(experiment) <- paste0('t_', 1:dim(experiment)[2])
+rownames(experiment) <- paste0('exp_', 1:dim(experiment)[1])
+head(experiment, 20)
+```
+
+Let's estimate `P(H)` and `P(T)` from the `experiment` matrix from each of the 10000 statistical experiments:
+
+```{r echo = T}
+probability <- apply(experiment, 1, table)
+head(probability)
+```
+Ok:
+
+```{r echo = T}
+probability <- sapply(probability, function(x) {
+  x/sum(x)
+})
+head(probability)
+```
+Now:
+
+```{r echo = T}
+probability <- as.data.frame(purrr::reduce(probability, rbind), 
+                             stringsAsFactors = F)
+head(probability)
+```
+
+**Note.** I have used the `reduce()` function from `{purrr}` in place of base R `Reduce()`; `{purrr}` is a part of `{tidyverse}`. The motivation to use the `{purrr}` versions of some basic Functional Programming functions in R is nicely explained in the following blog post: [TO PURRR OR NOT TO PURRR](https://www.mango-solutions.com/to-purrr-or-not-to-purrr/).
+
+And now we would want to plot the histograms of the `H` and `T` values:
+
+```{r echo = T}
+pH <- as.data.frame(table(probability$H), 
+                    stringsAsFactors = F)
+pH$Result <- 'H'
+pT <- as.data.frame(table(probability$T), 
+                    stringsAsFactors = F)
+pT$Result <- 'T'
+probabilityDistribution <- rbind(pH, pT)
+colnames(probabilityDistribution) <- c('Estimate', 'Frequency', 'Result')
+```
+
+Finally:
+
+```{r echo = T, message = F, warning = F}
+ggplot(probabilityDistribution, 
+       aes(x = Estimate, y = Frequency, 
+           color = Result, 
+           fill = Result)) + 
+  geom_bar(stat = "identity") + 
+  scale_color_manual(values = c('cadetblue4', 'cadetblue2')) +
+  scale_fill_manual(values = c('cadetblue4', 'cadetblue2')) + 
+  facet_wrap(~Result) + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(strip.background = element_blank()) + 
+  theme(legend.position = "none")
+```
+**Q.** Is the coin fair or not?
+
+What are *the most frequently observed* estimates of `P(H)` and `P(T)` in these two distributions?
+
+```{r echo = T, message = F, warning = F}
+probabilityDistribution %>% 
+  dplyr::select(Estimate, Frequency, Result) %>% 
+  dplyr::group_by(Result) %>% 
+  dplyr::summarise(mode = Estimate[which.max(Frequency)])
+```
+
+What are *the mean* estimates of `P(H)` and `P(T)` in these two distributions?
+
+```{r echo = T, message = F, warning = F}
+probabilityDistribution %>% 
+  dplyr::select(Estimate, Frequency, Result) %>% 
+  dplyr::group_by(Result) %>% 
+  dplyr::summarise(mean = sum(as.numeric(Estimate)*Frequency)/sum(Frequency))
+```
+
+Well it does look like a fair coin in the end. 
+
+Let's play the following game: 
+
+- we role out ~20,000 statistical experiments with a fair coin, 
+- each time increasing the number of coin tosses as 10:20000;
+- each time we perform an experiment, we compute the mean of the observations,
+- which we will code as `1` for `H` and `0` for `T`:
+
+```{r echo = T}
+sample_sizes <- 10:20000
+meanProbs <- sapply(sample_sizes, function(y) {
+  s <- sample(x = c(0, 1), size = y, replace = TRUE, prob = rep(.5, 2))
+  return(mean(s))
+})
+meanProbsPlot <- as.data.frame(meanProbs)
+colnames(meanProbsPlot) <- "Probability"
+ggplot(meanProbsPlot,
+       aes(x = Probability)) + 
+  geom_histogram(bins = 500, fill = "red") + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+**Q.** What is the difference between each mean in `meanProbs` and the value of `p = .5`?
+
+```{r echo = T}
+diffs <- .5 - meanProbs
+diffs <- as.data.frame(diffs)
+diffs$sample_size <- sample_sizes
+ggplot(diffs, 
+       aes(x = sample_size, 
+           y = diffs)) + 
+  geom_line(color = "cadetblue2", size = .25) + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90)) + 
+  theme(panel.border = element_blank())
+```
+Interesting. **Q.** Do you believe in computer generated random numbers?
+
+Let's play the following game: 
+
+- we role out ~20,000 statistical experiments with an **unfair coin**,
+- the one which results in `1` with `p = .7` and `0` with `p = .3`,
+- each time increasing the number of coin tosses as 10:20000;
+- each time we perform an experiment, we compute the mean of the observations,
+- which we will code as `1` for `H` and `0` for `T`:
+
+```{r echo = T}
+sample_sizes <- 10:20000
+meanProbs <- sapply(sample_sizes, function(y) {
+  s <- sample(x = c(0, 1), size = y, replace = TRUE, prob = c(.3, .7))
+  mean(s)
+})
+meanProbsPlot <- as.data.frame(meanProbs)
+colnames(meanProbsPlot) <- "Probability"
+ggplot(meanProbsPlot,
+       aes(x = Probability)) + 
+  geom_histogram(bins = 500, fill = "blue") + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+**Q.** What is the difference between each mean in `meanProbs` and the value of `p = .5`?
+
+```{r echo = T}
+diffs <- .5 - meanProbs
+diffs <- as.data.frame(diffs)
+diffs$sample_size <- sample_sizes
+ggplot(diffs, 
+       aes(x = sample_size, 
+           y = diffs)) + 
+  geom_line(color = "cadetblue4", size = .25) + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90)) + 
+  theme(panel.border = element_blank())
+```
+**Note.** Whatch the `y` axis carefully... ^^
+
+**Q.** *Oh, wait:* what is the difference between each mean in `meanProbs` and the value of `p = .7`?
+
+```{r echo = T}
+diffs <- .7 - meanProbs
+diffs <- as.data.frame(diffs)
+diffs$sample_size <- sample_sizes
+ggplot(diffs, 
+       aes(x = sample_size, 
+           y = diffs)) + 
+  geom_line(color = "cadetblue4", size = .25) + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90)) + 
+  theme(panel.border = element_blank())
+```
+
+#### 2. A dice
+
+The following does not even need an introduction:
+
+```{r echo = T}
+results <- sample(x = 1:6, size = 100, replace = T, prob = rep(1/6, 6))
+table(results)
+```
+A fair dice? I don't know (but... `prob = rep(1/6, 6)`). Let' see:
+
+Ok:
+
+- a set of statistical experiments is performed, 
+- each time we toss a fair dice, 
+- each time increasing the number of tosses as `seq(1000, 9600, by = 500)`.
+
+```{r echo = T}
+domain <- 1:6
+sample_sizes <- seq(100, 9600, by = 500)
+probs = rep(1/6, 6)
+results <- lapply(sample_sizes, function(y) {
+  s <- sample(x = domain, size = y, replace = T, prob = probs)
+  s <- as.data.frame(table(s))
+  colnames(s) <- c('Outcome', 'Frequency')
+  s$sample_size <- y
+  return(s)
+})
+results <- reduce(results, rbind)
+print(results)
+```
+
+```{r echo = T}
+ggplot(results, 
+       aes(x = Outcome, 
+           y = Frequency,)) + 
+  geom_bar(stat = "identity", 
+           fill = "black", 
+           color = "black", 
+           width = .5) + 
+  facet_wrap(~sample_size, ncol = 5, scales = "free") + 
+  ylab("Probability") + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(strip.background = element_blank()) + 
+  theme(axis.text.y = element_text(size = 8))
+```
+**Note.** In the previous coin tossing experiments we have varied two things: **p**, the probability of obtaining `H` or `T`, and the number of coin tosses in the experiment, which we can term: **n**. Now, observe how `P(H) = 1 - P(T)`, simply because a coin always turns either `H` or `T`. So we are not working with two probabilities, `P(H)` and `P(T)`, really, but with only one: **p**, and say that **p** stands for `P(H)` because we can always know `P(T)` if we know the former. In other words, there are two numbers that we can use to describe each statistical experiment that encompasses coin tosses: **p**, and **n**. Remember them well.
+
+### 2. Mean, Variance, and Standard Deviation
+
+We already know about the *mean* - or the *expected value*, as it is also called - of a set of observations:
+
+```{r echo = T}
+observations <- c(5.5, 1.9, 7.3, 4.4, 6.2, 6.5, 2, 8.3, .1, 5.7, 1.3)
+meanObservations <- sum(observations)/length(observations)
+meanObservations == mean(observations)
+```
+
+#### 2.1 Central Tendency and Dispersion
+
+*Mean*, *median* (or the 50th percentile), and *mode* (the most frequently observed value in a set of observations) are all *measures of central tendency* in statistics. We have also learned about some *measures of dispersion* already, without even introducing the term. For example, in Session06 on EDA we have used the *Interquartile Range*, `IQR`, which is the difference between the 3rd and the 1st quartile in the data, as well as the *range*: the difference between the maximum and minimum of the observations. Now we introduce two new measures of dispersion: the *variance* and *standard deviation*.
+
+```{r echo = T}
+observations <- c(5.5, 1.9, 7.3, 4.4, 6.2, 6.5, 2, 8.3, .1, 5.7, 1.3)
+n <- length(observations)
+meanObservations <- mean(observations)
+squared_residuals <- (observations - mean(observations))^2
+varianceObservations <- sum(squared_residuals)/(n-1)
+print(varianceObservations)
+```
+
+And of course there is the `var()` function in base R:
+
+```{r echo = T}
+var(observations)
+```
+
+Again: how is variance computed?
+
+$$\sigma^2 = \frac{\sum_{i=1}^{N}(x_i - \overline{x})^2}{N-1}$$
+And we also use the square root of the variance, *standard deviation*, to describe the dispersion of measurements:
+
+$$\sigma = \sqrt{\frac{\sum_{i=1}^{N}(x_i - \overline{x})^2}{N-1}}$$
+
+A handy R function `sd()` does exactly that:
+
+```{r echo = T}
+sd(observations)
+```
+
+#### 2.2 Descriptive statistics for `mtcars`
+
+Now when we know this, we can complete the descriptive statistics of `mtcars` that we have used in Session06 on EDA, just for an exercise:
+
+```{r echo = T}
+data(mtcars)
+descriptives <- mtcars %>%
+  summarise(across(.cols = everything(),
+                   .fns = list(mean = mean,
+                               median = median, 
+                               min = min, 
+                               max = max, 
+                               range = ~ max(.x) - min(.x),
+                               IQR = IQR, 
+                               var = var, 
+                               stddev = sd))
+            )
+print(descriptives)
+```
+
+We need to tidy up, obviously:
+
+```{r echo = T}
+descriptives <- as.data.frame(t(descriptives))
+colnames(descriptives) <- 'value'
+descriptives$measurement <- rownames(descriptives)
+head(descriptives)
+```
+
+```{r echo = T}
+descriptives <- descriptives %>% 
+  tidyr::separate(measurement,
+                  into = c('feature', 'statistic'),
+                  sep = "_")
+head(descriptives)
+```
+
+And finally:
+
+```{r echo = T}
+descriptives <- descriptives %>% 
+  tidyr::pivot_wider(names_from = 'statistic',
+                     values_from = 'value')
+print(descriptives)
+```
+
+#### 2.3 Probability and Probability Functions: an overview
+
+![](../_img/S07_01_ProbabilityFunctions.jpeg)
+
+### 3. The Binomial Distribution: **p**, **n**
+
+#### 3.1 Binomial Distribution
+
+The Binomial distribution models the following, basic statistical experiment: (1) toss a coin that has a probability $p$ for Heads; repeat the experiment $n$ times. The distribution models the number of "*successes*" (e.g. obtaining Heads) in $n$ repeated tosses; each coin toss is known as a *Bernoulli trial* - and constitutes an even more elementary statistical experiment on its own.
+
+The probability of obtaining $k$ successes (conventionally: *Heads*) with probability $p$ from $n$ trials is given by:
+
+$${P(X=k;n,k)} = {{n}\choose{k}}p^{k}(1-p)^{n-k}$$
+where 
+
+$${{n}\choose{k}} = \frac{n!}{k!(n-k)!}$$
+is the binomial coefficient.
+
+Consider the following experiment: a person rolls a fair dice ten times. **Q:** What is the probability of obtaining five *or less* sixes at random?
+
+We know that R's `dbinom()` represents the binomial probability mass function (p.m.f.). Let's see: the probability of getting *exactly* five sixes at random is:
+
+``` {r echo = T}
+pFiveSixes <- dbinom(5, size = 10, p = 1/6)
+pFiveSixes
+```
+
+Do not be confused by our attempt to model dice rolls by a binomial distribution: in fact, there are only two outcomes here, "*6 is obtained*" with $p = 1/6$ and "*everything else*" with $1-p = 5/6$!
+
+Then, the probability of getting five or less than five sixes from ten statistical experiments is:
+
+``` {r echo = T}
+pFiveAndLessSixes <- sum(
+  dbinom(0, size = 10, p = 1/6),
+  dbinom(1, size = 10, p = 1/6),
+  dbinom(2, size = 10, p = 1/6),
+  dbinom(3, size = 10, p = 1/6),
+  dbinom(4, size = 10, p = 1/6),
+  dbinom(5, size = 10, p = 1/6)
+)
+pFiveAndLessSixes
+```
+
+in order to remind ourselves that the probabilities of all outcomes from a discrete probability distribution - in our case, that "*0 sixes*", "*1 six*", "*2 sixes*", "*3 sixes*", "*4 sixes*", or "*5 sixes*" etc. obtain - will eventually sum up to one. However, let's wrap this up elegantly by using `sapply()`
+
+``` {r echo = T}
+pFiveAndLessSixes <- sum(sapply(seq(0,5), function(x) {
+  dbinom(x, size = 10, p = 1/6)
+}))
+pFiveAndLessSixes
+```
+
+or, even better, by recalling that we are working with a vectorized programming language:
+
+``` {r echo = T}
+pFiveAndLessSixes <- sum(dbinom(seq(0,5), size = 10, p =1/6))
+pFiveAndLessSixes
+```
+
+Of course, we could have used a *cummulative distribution function* (c.d.f) to figure out this as well:
+
+```{r echo = T}
+pFiveAndLessSixes <- pbinom(5, size = 10, p = 1/6)
+pFiveAndLessSixes
+```
+
+Again, do not forget: the binomial distribution models a statistical experiment with two outcomes only. In the present example, its parameter, $p = 1/6$, has a complement of $1-p = 5/6$, and the following semantics: either 5 comes out, OR everything else. The binomial distribution *does not model dice rolls*, but (fair or unfair) *coin tosses*. To model a dice, you need the *multinomial distribution*, which is the multivariate generalization of the binomial. We will cover only univariate distributions here.
+
+#### 3.2 Random Number Generation from the Binomial
+
+`rbinom()` will provide a vector of random deviates from the Binomial distribution with the desired parameter, e.g.:
+
+``` {r echo = T}
+# Generate a sample of random binomial variates:
+randomBinomials <- rbinom(n = 100, size = 1, p = .5)
+randomBinomials
+```
+
+Now, if each experiment encompasses 100 coin tosses:
+
+``` {r echo = T}
+randomBinomials <- rbinom(n = 100, size = 100, p = .5)
+randomBinomials # see the difference?
+```
+
+```{r echo = T}
+randomBinomials <- rbinom(n = 100, size = 10000, p = .5)
+randomBinomials
+```
+
+Let's plot the distribution of the previous experiment:
+
+```{r echo = T}
+randomBinomialsPlot <- data.frame(success = randomBinomials)
+ggplot(randomBinomialsPlot, 
+       aes(x = success)) + 
+  geom_histogram(binwidth = 10, 
+                 fill = 'deepskyblue', 
+                 color = 'deepskyblue') +
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+Interpretation: we were running **100** statistical experiments, each time drawing a sample of 10000 observations of a fair coin ($p = .5$). And now,
+
+``` {r echo = T}
+randomBinomials <- rbinom(100000, size = 100000, p = .5)
+randomBinomialsPlot <- data.frame(success = randomBinomials)
+ggplot(randomBinomialsPlot, 
+       aes(x = success)) + 
+  geom_histogram(binwidth = 10, 
+                 fill = 'deepskyblue', 
+                 color = 'deepskyblue') +
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+... we were running **10000** statistical experiments, each time drawing a sample of 100000 observations of a fair coin ($p = .5$)
+
+#### 3.3 Quantile Function of the Binomial distribution
+
+The *quantile* is defined as the smallest value $x$ such that $F(x) ≥ p$,  where $F$ is the distribution function (c.d.f.):
+
+``` {r echo = T}
+qbinom(p = .01, size = 100, prob = .5)
+qbinom(p = .99, size = 100, prob = .5)
+qbinom(p = .01, size = 200, prob = .5)
+qbinom(p = .99, size = 200, prob = .5)
+```
+
+Similarly, we could have obtained `Q1`, `Q3`, and the median, for say **n** of 100 (that is `size` in `qbinom()`) and **p** of .5 (that is `prob` in `qbinom()`):
+
+``` {r echo = T}
+qbinom(p = .25, size = 100, prob = .5)
+qbinom(p = .5, size = 100, prob = .5)
+qbinom(p = .75, size = 100, prob = .5)
+```
+
+``` {r echo = T}
+qbinom(p = .25, size = 1000, prob = .5)
+qbinom(p = .5, size = 1000, prob = .5)
+qbinom(p = .75, size = 1000, prob = .5)
+```
+
+### 4. The Normal Distribution: **$\mu$**, **$\sigma$**
+
+Back to school: what is the probability that a person is 185 cm tall if we draw her at random from a population with mean height = 178 cm, standard deviation = 15 cm...
+
+#### 4.1 The Gaussian (Normal) Distribution
+
+``` {r echo = T}
+p185cm <- dnorm(185, mean = 178, sd = 15) #?
+p185cm
+```
+
+No, it is not 0.02385223... that is the *probability density* scale! The normal distribution is continuous: it doesn't really make sense to ask for a probability of a data point from its domain. Try this: what is the probability that a person is between 180 cm and 185 cm tall if we draw a person at random from a population with mean height = 178 cm, standard deviation = 15 cm?
+
+``` {r echo = T}
+p180_185cm <- dnorm(185, mean = 178, sd = 15) - dnorm(180, mean = 178, sd = 15)
+p180_185cm # oops...
+```
+
+Ooops. Maybe:
+
+``` {r echo = T}
+p180_185cm <- pnorm(185, mean = 178, sd = 15, lower.tail = T) - 
+  pnorm(180, mean = 178, sd = 15, lower.tail = T)
+p180_185cm # yes, that is correct: 0.1265957
+```
+
+That is correct: 0.1265957. Note the usage of `dnorm()` and `pnorm()` for density and the c.d.f. (short for: Cumulative Distribution Function) respectively, as for any other probability function in R.
+
+Gaussian, the bell curve, the famous one (this is going to take half an hour in $\LaTeX$ to write out):
+
+$$f(x|\mu,\sigma^2) = \frac{1}{\sqrt{2\sigma^2\pi}}e^{-\frac{(x-\mu)^2}{2\sigma^2}}$$
+
+(ohh...) where $\mu$ is the distribution mean, $\sigma^2$ its variance, **and be very, very careful to notice** how R's functions for the normal distribution use $\sigma$ - the *standard deviation* instead of variance:
+
+$$\sigma = \sqrt{\frac{\sum_{i=1}^{n}(x_i-\overline{x})^2}{n-1}}$$
+
+Let's plot it: 
+
+``` {r echo = T}
+empiricalNormal <- function(x) dnorm(x, mean = 178, sd = 15)
+normalData <- rnorm(1000, mean = 178, sd = 15)
+normalData = data.frame(data = normalData)
+ggplot(normalData, aes(x = data)) +
+  geom_density(colour = "black",
+               fill = "aliceblue",
+               alpha = .75) + 
+  stat_function(fun = empiricalNormal, 
+                colour = "red", 
+                size = 1) + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+Use 100,000 random deviates instead:
+
+``` {r echo = T}
+empiricalNormal <- function(x) dnorm(x, mean = 178, sd = 15)
+normalData <- rnorm(100000, mean = 178, sd = 15)
+normalData = data.frame(data = normalData)
+ggplot(normalData, aes(x = data)) +
+  geom_density(colour = "black",
+               fill = "aliceblue",
+               alpha = .75) + 
+  stat_function(fun = empiricalNormal, 
+                colour = "red", 
+                size = 1) + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+Now, the cumulative distribution:
+
+``` {r echo = T}
+normalData <- seq(120, 240)
+normalData <- data.frame(data = normalData, 
+                         p = pnorm(normalData, mean = 178, sd = 15))
+empiricalNormalCumulative <- function(x) pnorm(x, mean = 178, sd = 15)
+ggplot(normalData, aes(x = data, 
+                       y = p)) + 
+  geom_line(colour = "black", size = .25) + 
+  geom_point(size = 1, color = "black", fill = "black") + 
+  stat_function(fun = empiricalNormalCumulative, 
+                colour = "red", 
+                size = 1) + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+#### 4.2 Checking if a variable has a normal distribution
+
+Very often, one needs to check for the normality assumption in some data: whether the data are normally distributed, or not. That might sound as an easy task to perform, especially when knowing that many statisticians have worked on the problem in the past, but in practice it turns out to be trickier than expected.
+
+We will first use the famous **Kolmogorov-Smirnov Test** of normality (short: the K-S test) on the `Sepal.Length` variable in `iris`:
+
+```{r echo = T}
+data(iris)
+# The Kolmogorov-Smirnov Test
+ksSLength <- ks.test(iris$Sepal.Length,
+                     "pnorm",
+                     mean(iris$Sepal.Length),
+                     sd(iris$Sepal.Length),
+                     alternative = "two.sided",
+                     exact = NULL)
+ksSLength
+```
+
+In order to understand the result of the K-S test, look at the `p-value` in the output. We did not start the discussion of statistical estimation and hypothesis testing yet, so it is natural that you wonder what the *p* values is. For now, just remember: the distribution of some variable is normal according to the K-S test if the p value associated with the test statistic *D* (also found in the output  above^^) is *larger* than .05.
+
+Good. The K-S test says this is a normal distribution:
+
+``` {r echo = T}
+ggplot(iris,
+       aes(x = Sepal.Length)) + 
+  geom_histogram(binwidth = .25, fill = "darkorange", color = "black") + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+And what do you think?
+
+We will try to test for normality by using the **Shapiro-Wilk Test** (short: S-W test): it is better for small samples, but unlike K-S, it applies to the Normal distribution only.
+
+``` {r echo = T}
+swPLength <- shapiro.test(iris$Sepal.Length)
+swPLength
+```
+
+**Note.** The p-value > 0.05 implies that the distribution of the data **is not** significantly different from the normal distribution. Please: do not panic about these *p* things. All this will become clear in the sessions to follow.
+
+More often than not, you will want to take a look at the Q-Q plot to determine whether something is any similar to a target distribution or not:
+
+``` {r echo = T, fig.width = 3, fig.height = 3}
+qqnorm(iris$Sepal.Length, pch = 1, frame = FALSE)
+qqline(iris$Sepal.Length, col = "darkblue", lwd = 2)
+```
+
+What would you say now: is `Sepal.Length` from `iris` normally distributed?
+
+### Further Readings
+
+- [Probability concepts explained: probability distributions (introduction part 3) by Jonny Brooks-Bartlett, from Towards Data Science](https://towardsdatascience.com/probability-concepts-explained-probability-distributions-introduction-part-3-4a5db81858dc)
+- [Grinstead and Snell’s Introduction to Probability (NOTE: The Bible of Probability Theory)](https://math.dartmouth.edu/~prob/prob/prob.pdf). Definitely not an introductory material, but everything from Chapter 1. and up to Chapter 9. at least is (a) super-interesting to learn, (b) super-useful in Data Science, and (c) most Data Science practitioners already know it (or should know it). Enjoy!
+- [More on the Kolmogorov-Smirnov Test](https://www.itl.nist.gov/div898/handbook/eda/section3/eda35g.htm)
+- [More on QQ plots w. {ggplot2}](https://ggplot2.tidyverse.org/reference/geom_qq.html)
+- [More on Probability Functions in R: 2.1 Random Variables and Probability Distributions from Introduction to Econometrics with R](https://www.econometrics-with-r.org/2-1-random-variables-and-probability-distributions.html)
+
+
+### Some Introductory Video Material
+
+- [Khan Academy: Functions](https://www.khanacademy.org/math/algebra/x2f8bb11595b61c86:functions)
+- [Khan Academy: Basic theoretical probability](https://www.khanacademy.org/math/statistics-probability/probability-library/basic-theoretical-probability/v/basic-probability)
+- [Khan Academy: Probability Using Sample Spaces](https://www.khanacademy.org/math/statistics-probability/probability-library/probability-sample-spaces/v/events-and-outcomes-3)
+- [Khan Academy: Discrete Random Variables](https://www.khanacademy.org/math/statistics-probability/random-variables-stats-library/random-variables-discrete/v/random-variables)
+- [Khan Academy: Continuous Random Variables](https://www.khanacademy.org/math/statistics-probability/random-variables-stats-library/random-variables-continuous/v/probability-density-functions)
+
+### R Markdown
+
+[R Markdown](https://rmarkdown.rstudio.com/) is what I have used to produce this beautiful Notebook. We will learn more about it near the end of the course, but if you already feel ready to dive deep, here's a book: [R Markdown: The Definitive Guide, Yihui Xie, J. J. Allaire, Garrett Grolemunds.](https://bookdown.org/yihui/rmarkdown/) 
+
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+

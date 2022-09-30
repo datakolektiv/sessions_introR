@@ -1,0 +1,404 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Session21
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Session 21. Random Forests: Bagging, Out-Of-Bag (OOB) Error, Bootstrap Samples + Random Subspace Method.
+
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### What do we want to do today?
+
+Today we will introduce an idea even more powerful than the Decision Tree model to solve classification and regression problems: **the Random Forest model**. We will rely on the R package [{randomForest}](https://cran.r-project.org/web/packages/randomForest/) to train Random Forests in both classification and regression contexts. In order to understand Random Forests we will introduce some important theoretical concepts: *Bootstrap aggregating* (a.k.a. *Bagging*), *Out-of-bag (OOB) error*, and *Feature Bagging* (a.k.a. *the random subspace method* or *attribute bagging*). We will see how these approaches in Machine Learning prevent overfitting in the training of a complex model like Random Forest.
+
+
+### 0. Setup
+
+```{r echo = T, eval = F}
+install.packages('randomForest')
+install.packages('glmnet')
+```
+
+Grab the `HR_comma_sep.csv` dataset from the [Kaggle](https://www.kaggle.com/liujiaqi/hr-comma-sepcsv) and place it in your `_data` directory for this session. We will also use the [Boston Housing Dataset:  BostonHousing.csv](https://raw.githubusercontent.com/selva86/datasets/master/BostonHousing.csv)
+
+```{r echo = T, message = F, warning = F}
+dataDir <- paste0(getwd(), "/_data/")
+library(tidyverse)
+library(data.table)
+library(randomForest)
+library(ggrepel)
+```
+
+
+### 1. Random Forests for Classification
+
+We begin by loading and inspecting the `HR_comma_sep.csv` dataset:
+
+```{r echo = T, message = F, warning = F}
+dataSet <- read.csv(paste0(getwd(), "/_data/HR_comma_sep.csv"),
+                    header = T,
+                    check.names = 1,
+                    stringsAsFactors = F)
+glimpse(dataSet)
+```
+The task is to predict the value of `left` - whether the employee has left the company or not - from a set of predictors encompassing the following:
+
+- **satisfaction_level**: a measure of employee's level of satisfaction
+- **last_evaluation**: the result of a last evaluation
+- **number_projects**: in how many projects did the employee took part
+- **average_monthly_hours**: how working hours monthly on average
+- **time_spend_company**: for how long is the employee with us
+- **Work_accident**: any work accidents?
+- **promotion_last_5years**: did the promotion occur in the last five years?
+- **sales**: department (sales, accounting, hr, technical, support, management, IT, product_mng, marketing, RandD)
+- **salary**: salary class (low, medium, high)
+
+
+#### 1.1 Random Forests: the Algorithm
+
+There three important concepts to understand how Random Forest builds upon Decision Trees:
+
+![](../_img/S21_01_RandomForest.jpeg)
+
+- **Bootstrap aggregating (Bagging).** We begin with some training set for our model, $D$. Bagging generates $m$ new training sets, $D_i$, $i = 1, 2, ..., m$, by randomly sampling from $D$ uniformly and *with replacement*. The samples obtained in this way are known as *bootstrap samples*. In Random Forests, $m$ simpler models - Decision Trees, precisely - are fitted for each $D_i$ bootstrap sample. 
+
+- **Out-of-bag (OOB) error.** Each time a new bootstrap sample $D_i$ is produced, some data points remain *out of the bag*, are not used in model training, and form the **OOB set** (the *Out-of-bag set*). The OOB error is a *prediction error* (remember this concept from our introduction to cross-validation?) which is computed from the OOB set, where the prediction is obtained by averaging the response (in regression) or as a majority vote (in classification) from all the trees in the forest that were not trained on that particular OOB instance.
+
+- **The Random Subspace Method (Feature Bagging).** The Random Subspace Method is a method to control for the complexity of the decision trees grown in a Random Forest model. **On each new split**, only a randomly chosen *subset of predictors* is used to find the optimal split. The Random Forests algorithm, as we will see, has a control parameter that determines how many features are randomly selected to produce a new split.  
+
+
+#### 1.2 Classification w. {randomForest}
+
+We will fit a Random Forest model to the `HR_comma_sep.csv` dataset with `randomForest::randomForest()` in R. In spite of all the precautionary measures already taken in the Random Forest model itself, we will still perform an additional *outter* k-fold cross-validation with 5 folds: better safe than sorry. 
+
+First, define the folds:
+
+```{r echo = T, message = F, warning = F}
+dataSet$ix <- sample(1:5, dim(dataSet)[1], replace = T)
+table(dataSet$ix)
+```
+Perform a 5-fold cross validation for a set of Random Forests across the following control parameters:
+
+- **ntree:** the number of trees to grow
+- **mtry:** the number of variables to randomly sample as candidates at each split (to control Feature Bagging)
+
+```{r echo = T, message = F, warning = F}
+ntree <- seq(250, 1000, by = 250)
+mtry <- 1:(dim(dataSet)[2]-2)
+# - mtry: we do not count `left` which is an outcome
+# - and `ix` which is a fold index, so we have
+# - dim(dataSet)[2]-2 predictors in the model.
+# - start timer:
+tstart <- Sys.time()
+rfModels <- lapply(ntree, function(nt) {
+  # - lapply() across ntree
+  mtrycv <- lapply(mtry, function(mt) {
+    # - lapply() across mt
+    cv <- lapply(unique(dataSet$ix), function(fold) {
+      # - lapply across folds:
+      # - split training and test sets
+      testIx <- fold
+      trainIx <- setdiff(1:5, testIx)
+      trainSet <- dataSet %>% 
+        dplyr::filter(ix %in% trainIx) %>% 
+        dplyr::select(-ix)
+      testSet <- dataSet %>% 
+        dplyr::filter(ix %in% testIx) %>%
+        dplyr::select(-ix)
+      # - `left` to factor for classification 
+      # -  w. randomForest()
+      trainSet$left <- as.factor(trainSet$left)
+      testSet$left <- as.factor(testSet$left)
+      # - Random Forest:
+      model <- randomForest::randomForest(formula = left ~ .,
+                                          data = trainSet, 
+                                          ntree = nt,
+                                          mtry = mt
+                                          )
+      # - ROC analysis:
+      predictions <- predict(model, 
+                             newdata = testSet)
+      hit <- sum(ifelse(predictions == 1 & testSet$left == 1, 1, 0))
+      hit <- hit/sum(testSet$left == 1)
+      fa <- sum(ifelse(predictions == 1 & testSet$left == 0, 1, 0))
+      fa <- fa/sum(testSet$left == 0)
+      acc <- sum(predictions == testSet$left)
+      acc <- acc/length(testSet$left)
+      # - Output:
+      return(
+        data.frame(fold, hit, fa, acc)
+      )
+    })
+    # - collect results from all folds:
+    cv <- rbindlist(cv)
+    # - average ROC:
+    avg_roc <- data.frame(hit = mean(cv$hit),
+                          fa = mean(cv$fa), 
+                          acc = mean(cv$acc),
+                          mtry = mt)
+    return(avg_roc)
+  })
+  # - collect from all mtry values:
+  mtrycv <- rbindlist(mtrycv)
+  # - add ntree and out:
+  mtrycv$ntree <- nt
+  return(mtrycv)
+})
+# - collect all results
+rfModels <- rbindlist(rfModels)
+write.csv(rfModels, 
+          paste0(getwd(), "/rfModels.csv"))
+# - Report timing:
+print(paste0("The estimation took: ", 
+             difftime(Sys.time(), tstart, units = "mins"), 
+             " minutes."))
+```
+
+```{r echo = T, message = F, warning = F}
+print(rfModels)
+```
+
+Let's inspect the CV results visually. Accuracy first:
+
+```{r echo = T, message = F, warning = F}
+rfModels$ntree <- factor(rfModels$ntree)
+rfModels$mtry <- factor(rfModels$mtry)
+ggplot(data = rfModels, 
+       aes(x = mtry,
+           y = acc, 
+           group = ntree, 
+           color = ntree,
+           fill = ntree,
+           label = round(acc, 2))
+       ) +
+  geom_path(size = .25) + 
+  geom_point(size = 1.5) + 
+  ggtitle("Random Forests CV: Accuracy") +
+  theme_bw() + 
+  theme(panel.border = element_blank()) +
+  theme(plot.title = element_text(hjust = .5, size = 8))
+```
+
+Hit rate:
+
+```{r echo = T, message = F, warning = F}
+ggplot(data = rfModels, 
+       aes(x = mtry,
+           y = hit, 
+           group = ntree, 
+           color = ntree,
+           fill = ntree,
+           label = round(acc, 2))
+       ) +
+  geom_path(size = .25) + 
+  geom_point(size = 1.5) + 
+  ggtitle("Random Forests CV: Hit Rate") +
+  theme_bw() + 
+  theme(panel.border = element_blank()) +
+  theme(plot.title = element_text(hjust = .5, size = 8))
+```
+False Alarm rate:
+
+```{r echo = T, message = F, warning = F}
+ggplot(data = rfModels, 
+       aes(x = mtry,
+           y = fa, 
+           group = ntree, 
+           color = ntree,
+           fill = ntree,
+           label = round(acc, 2))
+       ) +
+  geom_path(size = .25) + 
+  geom_point(size = 1.5) + 
+  ggtitle("Random Forests CV: FA Rate") +
+  theme_bw() + 
+  theme(panel.border = element_blank()) +
+  theme(plot.title = element_text(hjust = .5, size = 8))
+```
+
+And pick the best model from ROC:
+
+```{r echo = T, message = F, warning = F}
+rfModels$diff <- rfModels$hit - rfModels$fa
+w_best <- which.max(rfModels$diff)
+rfModels[w_best, ]
+```
+
+And we can still refine the chosen model:
+
+```{r echo = T, message = F, warning = F}
+dataSet <- dataSet %>% 
+  dplyr::select(-ix)
+dataSet$left <- factor(dataSet$left)
+optimal_model <- randomForest::randomForest(formula = left ~ .,
+                                            data = dataSet,
+                                            ntree = 250,
+                                            mtry = 4)
+optimal_model$importance
+```
+
+The cumulative OOB error up to the i-th tree can be found in the first column of the `optimal_model$err.rate` field:
+
+```{r echo = T, message = F, warning = F}
+head(optimal_model$err.rate)
+```
+Let's take a closer look at it:
+
+```{r echo = T, message = F, warning = F}
+oobFrame <- as.data.frame(optimal_model$err.rate)
+oobFrame$ntree <- 1:dim(oobFrame[1])
+ggplot(data = oobFrame, 
+       aes(x = ntree,
+           y = OOB)) + 
+  geom_path(size = .25) + 
+  geom_point(size = 1.5) + 
+  ggtitle("Cumulative OOB error from the CV optimal Random Forest model") +
+  theme_bw() + 
+  theme(panel.border = element_blank()) +
+  theme(plot.title = element_text(hjust = .5, size = 8))
+```
+
+We can observe how the cumulative OOB error stabilizes following the growth of a certain number of trees in the Random Forest model:
+
+```{r echo = T, message = F, warning = F}
+w_tree <- which.min(oobFrame$OOB)
+print(w_tree)
+```
+And finally:
+
+```{r echo = T, message = F, warning = F}
+optimal_model <- randomForest::randomForest(formula = left ~ .,
+                                            data = dataSet,
+                                            ntree = w_tree,
+                                            mtry = 4
+                                            )
+predictions <- predict(optimal_model, 
+                       newdata = dataSet)
+hit <- sum(ifelse(predictions == 1 & dataSet$left == 1, 1, 0))
+hit <- hit/sum(dataSet$left == 1)
+fa <- sum(ifelse(predictions == 1 & dataSet$left == 0, 1, 0))
+fa <- fa/sum(dataSet$left == 0)
+acc <- sum(predictions == dataSet$left)
+acc <- acc/length(dataSet$left)
+print(paste0("Accuracy: ", acc, "; Hit rate: ", hit, "; FA rate: ", fa))
+```
+
+### 2. Random Forests for Regression
+
+In {randomForest}, to obtain the Random Forest model for regression **simply do not pronounce an outcome to be a factor**.
+We will use the Boston Housing dataset to demonstrate.
+
+```{r echo = T, message = F, warning = F}
+dataSet <- read.csv(paste0('_data/', 'BostonHousing.csv'), 
+                    header = T, 
+                    check.names = F,
+                    stringsAsFactors = F)
+head(dataSet)
+```
+
+Here are the variables:
+
++ **crim**: per capita crime rate by town
++ **zn**: proportion of residential land zoned for lots over 25,000 sq.ft.
++ **indus**: proportion of non-retail business acres per town.
++ **chas**: Charles River dummy variable (1 if tract bounds river; 0 otherwise)
++ **nox**: nitric oxides concentration (parts per 10 million)
++ **rm**: average number of rooms per dwelling
++ **age**: proportion of owner-occupied units built prior to 1940
++ **dis**: weighted distances to five Boston employment centers
++ **rad**: index of accessibility to radial highways
++ **tax**: full-value property-tax rate per $10,000
++ **ptratio**: pupil-teacher ratio by town
++ **b**: 1000(Bk - 0.63)^2 where Bk is the proportion of blacks by town
++ **lstat**: % lower status of the population
++ **medv**: Median value of owner-occupied homes in $1000's
+
+The `medv` variable is the *outcome*.
+
+Random Forest (no cross-validation this time):
+
+```{r echo = T, message = F, warning = F}
+rfRegMsodel <- randomForest::randomForest(formula = medv ~ .,
+                                          data = dataSet,
+                                          ntree = 1000,
+                                          mtry = 7
+                                          )
+```
+
+We can use the generic `plot()` function to assess how the MSE changes across `ntree`:
+
+```{r echo = T, message = F, warning = F}
+plot(rfRegMsodel)
+```
+
+```{r echo = T, message = F, warning = F}
+predictions <- predict(rfRegMsodel, 
+                       newdata = dataSet)
+predictFrame <- data.frame(predicted_medv = predictions, 
+                           observed_medv = dataSet$medv)
+ggplot(data = predictFrame, 
+       aes(x = predicted_medv,
+           y = observed_medv)) + 
+  geom_smooth(method = "lm", size = .25, color = "red") + 
+  geom_point(size = 1.5, color = "black") + 
+  geom_point(size = .75, color = "white") +
+  ggtitle("Random Forest in Regression: Observed vs Predicted\nBoston Housing Dataset") + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) +
+  theme(plot.title = element_text(hjust = .5, size = 8))
+```
+
+***
+
+### Further Readings
+
++ [Bagging (Bootstrap Aggregation), from Corporate Finance Institute](https://corporatefinanceinstitute.com/resources/knowledge/other/bagging-bootstrap-aggregation/)
+
++ [Hands-On Machine Learning with R, Chapter 10 Bagging](https://bradleyboehmke.github.io/HOML/bagging.html)
+
++ [A very basic introduction to Random Forests using R, from Oxford Protein Informatics Group](https://www.blopig.com/blog/2017/04/a-very-basic-introduction-to-random-forests-using-r/)
+
++ [A gentle introduction to random forests using R, Eight to Late](https://eight2late.wordpress.com/2016/09/20/a-gentle-introduction-to-random-forests-using-r/)
+
++ [VIDEO Random Forest In R | Simplilearn](https://www.youtube.com/watch?v=HeTT73WxKIc)
+
++ [Understanding Random Forest: How the Algorithm Works and Why it Is So Effective, Tony Yiu, Towards Data Science, Medium](https://towardsdatascience.com/understanding-random-forest-58381e0602d2#_=_)
+
+
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+

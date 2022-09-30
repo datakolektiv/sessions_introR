@@ -1,0 +1,597 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Session11
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Session 11: Mastering {data.table}: efficient operations on large datasets. Probability: Conditional Probability. The Bayes’ Theorem.
+
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### What do we want to do today?
+
+Getting to know `{data.table}`, the essential package for efficient processing of large datasets in RAM in R. Comparison: {dplyr} and {data.table}: that would be the "data" part of today's session. The "science" part considers conditional probabilities and the famous Bayes' Theorem.
+
+
+### 0. Prerequisits
+
+  1. `nycflights13` should be there already; also
+  2. `install.packages('data.table') - but I think we have already used it?
+  
+```{r echo = T, message = F, warning = F}
+library(tidyverse)
+library(data.table)
+dataDir <- paste0(getwd(), "/_data/")
+```
+
+### 1. {data.table}
+
+#### 1.1 Efficiently read large datasets in R: `data.table::fread()`
+
+We will use the `flights` dataset from the `{nycflights13}` package in this Session: 
+
+```{r echo = T}
+flightsFrame <- nycflights13::flights
+dim(flightsFrame)
+```
+Let's be clear: a data frame with `336776` rows and `19` columns is everything but "big" in any sense nowadays. However:
+
+```{r echo = T}
+write.csv(flightsFrame, paste0(dataDir, "flights.csv"))
+```
+
+And now it is just a `.csv` file in our local filesystem.
+
+```{r echo = T}
+system.time(flightsFrame_baseR <- read.csv(paste0(dataDir, "flights.csv"),
+                                           header = T,
+                                           row.names = 1,
+                                           stringsAsFactors = F,
+                                           check.names = F)
+            )
+```
+With `data.table::fread()`:
+
+```{r echo = T}
+system.time(flightsFrame_DT <- fread(paste0(dataDir, "flights.csv"),
+                                     header = T)
+            )
+```
+Compare..?
+
+```{r echo = T}
+cmp1 <- system.time(flightsFrame_baseR <- read.csv(paste0(dataDir, "flights.csv"),
+                                                   header = T,
+                                                   row.names = 1,
+                                                   stringsAsFactors = F,
+                                                   check.names = F)
+                    )
+cmp2 <- system.time(flightsFrame_DT <- fread(paste0(dataDir, "flights.csv"),
+                                                header = T)
+                    )
+as.numeric(cmp1[1])/as.numeric(cmp2[1])
+```
+The result may vary for various reasons: however, `data.table::fread()` does it order of magnitude faster than the baseR `read.csv()`. There is no reason to abandon `read.csv()` (or the *tidyverse* `{readr}` package functions). But when it comes to really large datasets... `fread()`. 
+
+Please be reminded of the following:
+
+```{r echo = T}
+class(flightsFrame_baseR)
+class(flightsFrame_DT)
+```
+There is a specific `data.table` class attached to R objects used as `data.tables`. 
+
+```{r echo = T}
+rm(flightsFrame_baseR)
+rm(flightsFrame)
+```
+
+#### 1.2 {data.table} essential operations
+
+Subsetting data.table can be similar to what we have already learned about base R.
+
+```{r echo = T}
+flightsFrame_DT$V1 <- NULL
+flightsFrame_DT[3:4, ]
+```
+
+Exclude rows by negative indexing (taking a small dataset to illustrate)
+
+```{r echo = T}
+irisDT <- data.table(iris) 
+irisDT[!3:7, ]
+```
+
+Filter rows in {data.table}:
+
+```{r echo = T}
+flightsFrame_DT[month > 6]
+```
+Let's compare with {dplyr}:
+
+```{r echo = T}
+cmp1 <- system.time(flightsFrame_DT[month > 6])
+cmp2 <- system.time(filter(flightsFrame_DT, month > 6))
+print("{data.table}:")
+print(cmp1)
+print("{dplyr}:")
+print(cmp2)
+```
+
+Filter using multiple conditions
+
+```{r echo = T}
+cmp1 <- system.time(flightsFrame_DT[month == 1 & dep_delay > 0])
+cmp2 <- system.time(filter(flightsFrame_DT, month > 1 & dep_delay > 0))
+print("{data.table}:")
+print(cmp1)
+print("{dplyr}:")
+print(cmp2)
+```
+
+Sorting rows:
+
+```{r echo = T}
+cmp1 <- system.time(flightsFrame_DT[order(dep_delay)])
+cmp2 <- system.time(arrange(flightsFrame_DT, dep_delay))
+print("{data.table}:")
+print(cmp1)
+print("{dplyr}:")
+print(cmp2)
+```
+Enters `data.table::setkey()`
+
+```{r echo = T}
+setkey(flightsFrame_DT, dep_delay)
+key(flightsFrame_DT)
+```
+
+```{r echo = T}
+cmp1 <- system.time(flightsFrame_DT[order(dep_delay)])
+cmp2 <- system.time(arrange(flightsFrame_DT, dep_delay))
+print("{data.table}:")
+print(cmp1)
+print("{dplyr}:")
+print(cmp2)
+```
+
+Please be aware of the fact that the `system.time()` results will vary, and that our `flightsFrame_DT` is far from being of a size considerable for comparisons between `{data.table}` and {dplyr} or base R.
+
+Selecting columns is done in the following way. To return a data.table object from an existing data.table:
+
+```{r echo = T}
+arr_time <- flightsFrame_DT[ , list(arr_time)]
+class(arr_time)
+```
+The following accomplishes the same with `.` used as an alias for `list()`:
+
+```{r echo = T}
+arr_time <- flightsFrame_DT[, .(arr_time)]
+class(arr_time)
+```
+To obtain a vector from a data.table column:
+
+```{r echo = T}
+arr_time <- flightsFrame_DT[, arr_time]
+class(arr_time)
+```
+Or:
+
+```{r echo = T}
+arr_time <- flightsFrame_DT[['arr_time']]
+class(arr_time)
+```
+Now we can try a simple conjunction of filtering and selection operations in {data.table}, for example:
+
+```{r echo = T}
+selectedFlights <- 
+  flightsFrame_DT[arr_time > 100, .(arr_time, arr_delay, dest)]
+head(selectedFlights)
+```
+
+The {dplyr} equivalent is:
+
+```{r echo = T}
+selectedFlights_dplyr <- flightsFrame_DT %>% 
+  select(arr_time, arr_delay, dest) %>% 
+  filter(arr_time > 100)
+head(selectedFlights_dplyr)
+```
+
+Let's create new variables:
+
+```{r echo = T}
+arr_time_hours <- 
+  flightsFrame_DT[air_time > 20, .(air_time, air_time_hours = air_time/60)]
+head(arr_time_hours)
+```
+
+Enters `:=` - the column assignment operator in `{data.table}`, which allows to modify a data.table object *by reference* (to be explained in the Session). We will first filter out all rows with an `NA` value in `air_time`:
+
+```{r echo = T}
+dim(flightsFrame_DT)
+flightsFrame_DT <- flightsFrame_DT[!is.na(air_time)]
+dim(flightsFrame_DT)
+```
+Using `:=` we can modify a data.table object *without having to make a copy of it* - which happens with both base R data.frame objects and in {dplyr}:
+
+```{r echo = T}
+flightsFrame_DT[ , air_time_hours := air_time/60]
+flightsFrame_DT[ , .(air_time, air_time_hours)]
+```
+
+#### 1.3 {data.table} grouping (`by = `), aggregation, and joins
+
+A simple aggregation:
+
+```{r echo = T}
+flightsFrame_DT[ , .(avg_air_time = mean(air_time)), by = dest]
+```
+This is equivalent to {dplyr}:
+
+```{r echo = T}
+flightsFrame_DT %>% 
+  select(dest, air_time) %>% 
+  group_by(dest) %>% 
+  summarise(avg_air_time = mean(air_time))
+```
+
+Simple aggregation with filtering:
+
+```{r echo = T}
+flightsFrame_DT[dep_delay <= 0, 
+                .(avg_dep_delay = mean(dep_delay), avg_air_time = mean(air_time)), 
+                by = dest]
+```
+Count rows (observations) by groups:
+
+```{r echo = T}
+flightsFrame_DT[dep_delay <= 0, .N, by = dest]
+```
+
+To demonstrate a join operation in {data.table} load the `planes` data.frame from `nycflights13`:
+
+```{r echo = T}
+planes <- nycflights13::planes
+head(planes)
+```
+
+As a reminder, this is how it would be done in `{dplyr}` with `left_join()` over `tailnum` (see Session 10):
+
+```{r echo = T}
+flights_relations <- dplyr::left_join(flightsFrame_DT,
+                                      planes,
+                                      by = "tailnum")
+```
+
+In {data.table}, first use `setkey()`, then promote `planes` to a data.table object, and finally use `merge()`:
+
+```{r echo = T}
+setkey(flightsFrame_DT, tailnum)
+planes <- data.table(planes)
+setkey(planes, tailnum)
+flightPlanes <- merge(flightsFrame_DT,
+                      planes,
+                      by = "tailnum",
+                      all.x = T)
+```
+
+Oh. One final thing... `data.table::fwrite()`.
+
+```{r echo = T}
+system.time(
+  write.csv(flightsFrame_DT, paste0(dataDir, "flightsFrame_DT_writecsv.csv"))
+  )
+system.time(
+  fwrite(flightsFrame_DT, paste0(dataDir, "flightsFrame_DT_fwrite.csv"))
+  )
+```
+
+### 4. Conditional Probability and Bayes' Theorem
+
+### 4.1 Conditional Probability
+
+Imagine the following situation: there are two popular social groups, `A` and `B`, and we have the knowledge on how many men and women are members of them: in group `A` we find 87 men and 57 women, while in group `B` we find 57 men and 96 women.
+
+```{r echo = T}
+probs <- data.frame(Group = c('A', 'B'),
+                    Male = c(87, 44), 
+                    Female = c(57, 96))
+probs
+```
+
+Now imagine that we want to make one random draw from this sample and identify one single individual. What is the probability to randomly select a man vs a woman?
+
+Let's see: we have 
+
+```{r echo = T}
+men <- sum(probs$Male)
+print(men)
+```
+men, and 
+
+```{r echo = T}
+women <- sum(probs$Female)
+print(women)
+```
+women, so the probability `P(man)` would be:
+
+```{r echo = T}
+p_man <- men/(men + women)
+p_man
+```
+where `men + women` is also the total sample size. The probability to randomly draw a woman from the sample is:
+
+```{r echo = T}
+p_woman <- women/(men + women)
+p_woman
+```
+Of course,
+
+```{r echo = T}
+p_man + p_woman
+```
+Now: what would be the probability to randomly draw a man from the sample **if we already know** that we will be picking someone from group `A`? Let's take a look at the sample once again:
+
+```{r echo = T}
+probs
+```
+
+Obviously, we would focus our attention on the first row only, where we find 87 men and 57 women, neglecting the second row because we already know that the person is a member of group `A`.
+
+```{r echo = T}
+cp_man_A <- probs$Male[probs$Group == 'A']/(probs$Male[probs$Group == 'A'] + probs$Female[probs$Group == 'A'])
+cp_man_A
+```
+
+```{r echo = T}
+cp_woman_A <- 
+  probs$Female[probs$Group == 'A']/(probs$Male[probs$Group == 'A'] + probs$Female[probs$Group == 'A'])
+cp_woman_A
+```
+And again we have:
+
+```{r echo = T}
+cp_woman_A + cp_man_A
+```
+The probabilities `cp_man_A` and `cp_woman_A` are called **conditional probabilities** and play a very important role in many mathematical models used in Data Science and Machine Learning:
+
+$P(Y|X) = \frac{P(Y{\cap}X)}{P(X)}$
+
+where $P(Y|X)$ is the conditional probability of observing Y given that we already know that X obtains, while ${P(X{\cap}Y)}$ is the *joint probability* of observing both X and Y. Let' see: what is the joint probability of observing both a person from group A *and* a man? From the table we see that there are 87 men in group A, so that probability must be 87 divided by the total sample size which is `r sum(probs[, 2:3])`:
+
+```{r echo = T}
+probs$Male[1]/sum(probs[, 2:3])
+```
+Now we need to divide this joint probability by `P(A)` in total:
+
+```{r echo = T}
+sum(probs[1, 2:3])/sum(probs[, 2:3])
+```
+and the desired conditional probability is:
+
+```{r echo = T}
+jointP <- probs$Male[1]/sum(probs[, 2:3])
+totalP <- sum(probs[1, 2:3])/sum(probs[, 2:3])
+jointP/totalP
+```
+### 4.2 Independence
+
+Two events, $X$ and $Y$, are said to be *statistically independent* iff:
+
+$$P(X{\cap}Y) = P(X)P(Y)$$
+
+If $P(X)$ is not zero, and given that
+
+$$P(Y|X) = \frac{P(Y{\cap}X)}{P(X)}$$,
+
+that means that statistical independence implies something very intuitive, namely:
+
+$$P(Y|X) = P(Y)$$
+
+### 4.3 Bayes' Theorem
+
+It can be easily [shown](https://en.wikipedia.org/wiki/Bayes%27_theorem#Proof) that the following holds:
+
+$$P(Y|X) = \frac{P(X|Y)P(Y)}{P(X)}$$
+
+The expression is called [Bayes' Theorem](https://en.wikipedia.org/wiki/Bayes%27_theorem) and plays a role of **immense importance** in contemporary mathematical statistics, Data Science and Machine Learning.
+
+This is how we speak of its terms:
+
+$$P(Y|X)$$
+
+is the **posterior probability** of obtaining $Y$ from knowing $X$
+
+$$P(X|Y)$$
+
+is the **likelihood** of obtaining $X$ from knowing $Y$
+
+$$P(Y)$$
+
+is the **prior probability** of obtaining $Y$.
+
+### 4.4 Bayesian Inference for a Binomial Distribution from a Beta Prior
+
+Imagine that we wish to express our *belief* about the parameter $p$ of a Binomial Distribution by another function. It can be shown that it makes sense to use the [Beta Distribution](https://en.wikipedia.org/wiki/Beta_distribution) to express such beliefs, which has a support constrained to [0, 1]:
+
+$$P(x;\alpha, \beta) = \frac{x^{\alpha-1}(1-x)^{\beta-1}}{B(\alpha,\beta)}$$
+
+where $B(\alpha,\beta)$ is the Beta function
+
+$$B(\alpha,\beta)=\frac{\Gamma(\alpha)\Gamma(\beta)}{\Gamma(\alpha)+\Gamma(\beta)}$$
+
+and serves the purposes of normalization only.
+
+For example, a $Beta(x;\alpha,\beta)$ distribution with $\alpha = 7$ and $\beta=13$ looks like this:
+
+```{r echo = T}
+library(ggplot2)
+x <- seq(.01, .99, by = .01)
+density <- dbeta(x, 7, 13)
+densFrame <- data.frame(x = x, 
+                        density = density)
+ggplot(densFrame, aes(x = x, y = density)) + 
+  geom_path(size = .35, group = 1, color = "red") + 
+  ggtitle("Beta(3,7)") + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+And this is how $Beta(x;\alpha,\beta)$ distribution with $\alpha = 1$ and $\beta=1$ (i.e. the Uniform Prior) looks like
+
+```{r echo = T}
+x <- seq(.01, .99, by = .01)
+density <- dbeta(x, 1, 1)
+densFrame <- data.frame(x = x, 
+                        density = density)
+ggplot(densFrame, aes(x = x, y = density)) + 
+  geom_path(size = .35, group = 1, color = "red") + 
+  ggtitle("Beta(1,1)") + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+While $Beta(x;\alpha,\beta)$ distribution with $\alpha = 1/2$ and $\beta=1/2$ looks like this (this is also called a Jeffrey's Prior):
+
+```{r echo = T}
+x <- seq(.01, .99, by = .01)
+density <- dbeta(x, 1/2, 1/2)
+densFrame <- data.frame(x = x, 
+                        density = density)
+ggplot(densFrame, aes(x = x, y = density)) + 
+  geom_path(size = .35, group = 1, color = "red") + 
+  ggtitle("Beta(1/2,1/2)") + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+Turns out that the $Beta(\alpha, \beta)$ distribution has a nice property that makes it a suitable **conjugate prior distribution** in Bayesian inference for the Binomial Distribution. Namely, if our prior beliefs about the Binomial $p$ parameter are expressed as $Beta(p; \alpha, \beta)$, and then we observe $x$ successes from $n$ trials in a Binomial experiment, our posterior belief about the Binomial $p$ parameter can be expressed as:
+
+$$Beta(p;\alpha',\beta')$$
+where 
+
+$$\alpha' = \alpha + x$$
+
+and 
+
+$$\beta' = \beta + n - x$$
+Let's illustrate. Say that in the beginning we know nothing about the possible value of $p$. We express this absence of knowledge by a **uniform prior**, $Beta(\alpha=1, \beta=1))$:
+
+```{r echo = T}
+x <- seq(.01, .99, by = .01)
+density <- dbeta(x, 1, 1)
+densFrame <- data.frame(p = x, 
+                        density = density)
+ggplot(densFrame, aes(x = p, y = density)) + 
+  geom_path(size = .35, group = 1, color = "red") + 
+  ggtitle("Our a priori is: Beta(1,1)") + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+Let's assume that than we observe 1,000 coin tosses of which 275 resulted in success (i.e. $Head$); we update our prior beliefs accordingly:
+
+```{r echo = T}
+library(tidyr)
+x <- seq(.01, .99, by = .01)
+# - prior
+alpha <- 1
+beta <- 1
+density <- dbeta(x, alpha, beta)
+# - update
+post_alpha <- alpha + 275
+post_beta <- beta + 1000 - 275
+post_density <- dbeta(x, post_alpha, post_beta) 
+densFrame <- data.frame(p = x, 
+                        prior = density,
+                        posterior = post_density) %>% 
+  tidyr::pivot_longer(-p, 
+                      names_to = "beliefs",
+                      values_to = "value")
+ggplot(densFrame, aes(x = p, 
+                      y = value,
+                      group = beliefs, 
+                      color = beliefs)) + 
+  geom_path(size = .35, ) + 
+  ggtitle("Prior and Posterior") + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+And what if we have some prior knowlegde and do not wish to begin from a uniform prior distribution? What if we have already observed 1,000 coin tosses that resulted in 275 heads, and then only we observe another 500 tosses resulting in 150 heads (weird, but still)?
+
+```{r echo = T}
+library(tidyr)
+x <- seq(.01, .99, by = .01)
+# - prior
+alpha <- 276
+beta <- 726
+density <- dbeta(x, alpha, beta)
+# - update
+post_alpha <- alpha + 150
+post_beta <- beta + 500 - 150
+post_density <- dbeta(x, post_alpha, post_beta) 
+densFrame <- data.frame(p = x, 
+                        prior = density,
+                        posterior = post_density) %>% 
+  tidyr::pivot_longer(-p, 
+                      names_to = "beliefs",
+                      values_to = "value")
+ggplot(densFrame, aes(x = p, 
+                      y = value,
+                      group = beliefs, 
+                      color = beliefs)) + 
+  geom_path(size = .35, ) + 
+  ggtitle("Prior and Posterior") + 
+  theme_bw() + 
+  theme(panel.border = element_blank())
+```
+
+### Further Readings
+
+- [Introduction to data.table: Vignette](https://cran.r-project.org/web/packages/data.table/vignettes/datatable-intro.html)
+- [A data.table and dplyr tour](https://atrebas.github.io/post/2019-03-03-datatable-dplyr/)
+- [Bayes' Theorem, from English Wikipedia](https://en.wikipedia.org/wiki/Bayes%27_theorem)
+
+
+### R Markdown
+
+[R Markdown](https://rmarkdown.rstudio.com/) is what I have used to produce this beautiful Notebook. We will learn more about it near the end of the course, but if you already feel ready to dive deep, here's a book: [R Markdown: The Definitive Guide, Yihui Xie, J. J. Allaire, Garrett Grolemunds.](https://bookdown.org/yihui/rmarkdown/) 
+
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+

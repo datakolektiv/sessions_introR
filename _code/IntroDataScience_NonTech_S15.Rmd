@@ -1,0 +1,562 @@
+---
+title: Intro to Data Science (Non-Technical Background, R) - Session15
+author:
+- name: Goran S. Milovanović, PhD
+  affiliation: DataKolektiv, Chief Scientist & Owner; Data Scientist for Wikidata, WMDE
+abstract: 
+output:
+  html_notebook:
+    code_folding: show
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 5
+  html_document:
+    toc: yes
+    toc_depth: 5
+---
+
+![](../_img/DK_Logo_100.png)
+
+***
+# Session 15. The logic of statistical modeling explained: optimize the Simple Linear Regression model from scratch. Understanding why statistics = learning: the concept of error minimization.
+
+**Feedback** should be send to `goran.milovanovic@datakolektiv.com`. 
+These notebooks accompany the Intro to Data Science: Non-Technical Background course 2020/21.
+
+***
+
+### What do we want to do today?
+
+We will dive deep into theory today in an effort to understand the logic of statistical modeling by *error minimization*. We will talk a bit about different types of mathematical models that are being developed and used in contemporary Data Science, Machine Learning, and AI. We will distinguish between supervised and unsupervised learning on one, and then reinforcement learning on the other hand. Then we focus on supervised learning and the simple regression model again in order to understand how mathematical models are estimated from empirical data. We will demonstrate several different approaches to estimate a given model's parameters from data and discuss why they all converge along the same lines of perspective towards one single, important insight: statistics *is* learning.
+
+### 0. Prerequisits
+
+Setup:
+
+```{r echo = T, message = F, warning = F}
+dataDir <- paste0(getwd(), "/_data/")
+library(tidyverse)
+library(data.table)
+library(plotly)
+```
+
+
+### 1. Understanding Linear Regression
+
+#### 1.1 Sums of Squares in Simple Linear Regression
+
+Once again: `Sepal.Length` predicts `Petal.Length` in `iris`:
+
+``` {r echo = T, message = F}
+ggplot(data = iris,
+       aes(x = Sepal.Length, 
+           y = Petal.Length)) +
+  geom_point(aes(x = Sepal.Length, y = Petal.Length), color = "black", size = 2) +
+  geom_point(aes(x = Sepal.Length, y = Petal.Length), color = "white", size = 1.5) +
+  geom_smooth(method='lm', size = .25, color = "red") +
+  ggtitle("Sepal Length vs Petal Length") +
+  xlab("Sepal Length") + ylab("Petal Length") + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(plot.title = element_text(hjust = .5))
+```
+
+Let's recall the form of the simple linear regression model:
+
+$$Y = \beta_0 + \beta_1X_1 + \epsilon$$
+
+or
+
+$$outcome_i = model + error_i$$
+
+where $i$ is an index across the whole dataset (i.e. each row, each pair of `Sepal.Length` and `Petal.Lenth`, each observation). So, statistical models make errors in their predictions, of course. Then what model works the best for a given dataset? The one that *minimizes the error*, of course.
+
+Take a look at the following chart:
+
+``` {r echo = T, message = F}
+ggplot(data = iris,
+       aes(x = Sepal.Length, 
+           y = Petal.Length)) +
+  geom_point(aes(x = Sepal.Length, y = Petal.Length), color = "black", size = 2) +
+  geom_point(aes(x = Sepal.Length, y = Petal.Length), color = "white", size = 1.5) +
+  geom_hline(yintercept = mean(iris$`Petal.Length`), 
+             linetype = "dashed", 
+             color = "red") + 
+  ggtitle("Sepal Length vs Petal Length") +
+  xlab("Sepal Length") + ylab("Petal Length") + 
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(plot.title = element_text(hjust = .5))
+```
+
+The horizontal line in this chart has na intercept of `3.758`, which is the mean of `iris$Petal.Length`, the outcome variable in our simple linear regression model. If there were not a predictor `iris$Sepal.Length`, the mean of $Y$ would be our best possible guess about any new value observed on that variable. Let's take a look at the *residuals of the outcome variable from its own mean*:
+
+``` {r echo = T, message = F}
+linFit <- iris
+linFit$Petal.Length.AtMean <- linFit$Petal.Length - mean(linFit$Petal.Length)
+ggplot(data = linFit,
+       aes(x = Sepal.Length, 
+           y = Petal.Length)) +
+  geom_hline(yintercept = mean(iris$`Petal.Length`), 
+             linetype = "dashed", 
+             color = "red") +
+  geom_segment(aes(x = Sepal.Length, 
+                   y = Petal.Length, 
+                   xend = Sepal.Length, 
+                   yend = Petal.Length - Petal.Length.AtMean),
+               color = "black", size = .2, linetype = "dashed") +
+  geom_point(aes(x = Sepal.Length, y = Petal.Length), color = "black", size = 2) +
+  geom_point(aes(x = Sepal.Length, y = Petal.Length), color = "white", size = 1.5) +
+  geom_point(aes(x = Sepal.Length, y = mean(iris$Petal.Length)), color = "red", size = 1) +
+  xlab("Sepal.Length") + ylab("Petal.Length") +
+  theme_classic() +
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(strip.background = element_blank()) +
+  theme(axis.text.x = element_text(size = 6)) + 
+  theme(axis.text.y = element_text(size = 6)) 
+```
+What is our error, in total, if we start predicting the values of a variable from its mean alone, without any other predictor at hand? Enters the *Total Sum of Squares*, $SS_T$:
+
+``` {r echo = T, message = F}
+ss_total <- sum((iris$Petal.Length - mean(iris$Petal.Length))^2)
+print(ss_total)
+```
+
+Ok, now back to the simple linear regression model `Petal.Length ~ Sepal.Length`:
+
+``` {r echo = T, message = F}
+linFit <- lm(data = iris,
+             Petal.Length ~ Sepal.Length)
+linFit <- data.frame(
+  x = iris$Sepal.Length,
+  y = iris$Petal.Length,
+  predicted = linFit$fitted.values,
+  residuals = linFit$residuals
+)
+ggplot(data = linFit,
+       aes(x = x, y = y)) +
+  geom_smooth(method = lm, se = F, color = "red", size = .25) +
+  geom_segment(aes(x = x, 
+                   y = predicted, 
+                   xend = x, 
+                   yend = predicted + residuals),
+               color = "black", size = .2, linetype = "dashed") +
+  geom_point(aes(x = x, y = y), color = "black", size = 2) +
+  geom_point(aes(x = x, y = y), color = "white", size = 1.5) +
+  geom_point(aes(x = x, y = predicted), color = "red", size = 1) +
+  xlab("Sepal.Length") + ylab("Petal.Length") +
+  theme_classic() +
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(strip.background = element_blank()) +
+  theme(axis.text.x = element_text(size = 6)) + 
+  theme(axis.text.y = element_text(size = 6)) 
+```
+
+The *Residual Sum of Squares*,  $SS_R$,  is the sum of squared distances from the observed data points to the model's respective predictions:
+
+``` {r echo = T, message = F}
+slr_model <- lm(data = iris, 
+                Petal.Length ~ Sepal.Length)
+ss_residual <- sum(residuals(slr_model)^2)
+print(ss_residual)
+```
+
+Finally, the *Model Sum of Squares*,  $SS_M$.
+
+``` {r echo = T, message = F}
+linFit <- lm(data = iris,
+             Petal.Length ~ Sepal.Length)
+linFit <- data.frame(
+  x = iris$Sepal.Length,
+  y = iris$Petal.Length,
+  predicted = linFit$fitted.values,
+  meanY = mean(iris$Petal.Length)
+)
+ggplot(data = linFit,
+       aes(x = x, y = y)) +
+  geom_smooth(method = lm, se = F, color = "red", size = .25) +
+  geom_hline(yintercept = mean(iris$`Petal.Length`), 
+             linetype = "dashed", 
+             color = "red") +
+  geom_segment(aes(x = x, 
+                   y = predicted, 
+                   xend = x, 
+                   yend = meanY),
+               color = "red", size = .2, linetype = "dashed") +
+  geom_point(aes(x = x, y = y), color = "black", size = 2) +
+  geom_point(aes(x = x, y = y), color = "white", size = 1.5) +
+  geom_point(aes(x = x, y = predicted), color = "red", size = 1) +
+  xlab("Sepal.Length") + ylab("Petal.Length") +
+  theme_classic() +
+  theme_bw() + 
+  theme(panel.border = element_blank()) + 
+  theme(strip.background = element_blank()) +
+  theme(axis.text.x = element_text(size = 6)) + 
+  theme(axis.text.y = element_text(size = 6)) 
+```
+
+The *Model Sum of Squares*,  $SS_M$, is based on the distances between the *mean of the outcome* and the *model predictions*:
+
+``` {r echo = T, message = F}
+ss_model <- sum((linFit$predicted - linFit$meanY)^2)
+print(ss_model)
+```
+
+Now:
+
+``` {r echo = T, message = F}
+print(ss_total - ss_residual)
+```
+
+!!! The complete error present in an attempt to predict `Petal.Length` from its mean alone, $SS_T$, can be thus decomposed into $SS_R$ and $SS_M$:
+
+$$SS_{total} = SS_{model} + SS_{residual} = SS_T = SS_M + SS_R$$
+#### 1.2 $F-test$, $t-test$, and $R^2$ in Simple Linear Regression 
+
+But there are more tricks waiting to be pulled, see:
+
+``` {r echo = T, message = F}
+slr_model <- lm(data = iris, 
+                Petal.Length ~ Sepal.Length)
+summary(slr_model)
+```
+
+What is $SS_M/SS_T$?
+
+``` {r echo = T, message = F}
+print(ss_model/ss_total)
+```
+
+So we have: $R^2 = SS_M/SS_T$!
+
+Now, remember that $F-test$ in the output that has been mentioned in the past?
+
+Let's divide $SS_M$ and $SS_R$ by their respective degrees of freedom. For the $df_R$ in the simple linear regression (as in other models as well) we take the number of observations minus the numbers of the parameters in the model (two, in our case: the intercept and the slope), while for the $df_M$ we need to take only the number predictors in the model (one, in our case):
+
+``` {r echo = T, message = F}
+df_residual <- dim(iris)[1] - 2 # - num.obs - num.parameters
+print(paste0("df_residual is: ", df_residual))
+df_model <- 1 # - how many variables?
+print(paste0("df_model is: ", df_model))
+ms_model <- ss_model/df_model
+ms_residual <- ss_residual/df_residual
+print(paste0("MS_model is: ", ms_model))
+print(paste0("MS_residual is: ", ms_residual))
+```
+
+They are now called *mean squares*, our $MS_M$ and $MS_R$. Ok, now:
+
+``` {r echo = T, message = F}
+f_test <- ms_model/ms_residual
+print(f_test)
+```
+
+And know we know that 
+
+$F = MS_{Model}/MS_{Residual} = MS_M/MS_R$. The $F-test$ follows the [$F-distribution$](https://en.wikipedia.org/wiki/F-distribution) with $df_M$ and $df_R$ degrees of freedom:
+
+``` {r echo = T, message = F}
+x <- rf(100000, df1 = ms_model, df2 = ms_residual)
+hist(x, 
+     freq = FALSE, 
+     xlim = c(0,3), 
+     ylim = c(0,1),
+     xlab = '', 
+     main = ('F-distribution with df_1 = MS_M and df_2 = MS_R degrees of freedom (df)'), 
+     cex.main=0.9)
+curve(df(x, df1 = 10, df2 = 20), from = 0, to = 4, n = 5000, col= 'pink', lwd=2, add = T)
+```
+
+And another thing to observe:
+
+```{r echo = T}
+print(f_test)
+```
+
+```{r echo = T}
+slr_summary <- summary(slr_model)
+slr_coeffs <- data.frame(slr_summary$coefficients)
+print(slr_coeffs)
+```
+
+```{r echo = T}
+slr_ttest <- slr_coeffs$t.value[2]
+print(slr_ttest^2)
+```
+
+```{r echo = T}
+print(f_test)
+```
+
+**N.B.** Complicated things have many correct interpretations and connections that exist among them. For example:
+
+- the best simple linear statistical is the one that maximizes the effect of the model ($MS_M$) while minimizing the effect of the error ($MS_R$), which means
+- that the best simple linear statistical model is simply the one that minimizes the error, since $SS_T = SS_M + SS_R$, and $SS_T$ is fixed since it only says about the dispersion of the outcome variable around its mean; then,
+- the overall effect of the model can be measured by the extent of the $F-test$, which is essentially a ratio of two variances, $MS_M$ and $MS_R$, telling us how much does the model "works" beyond the error it produces, and which is a simple mathematical transformation of the 
+- $t-test$ of whether the model's slope ($\beta_1$) is different from zero in which case we know that the regression line "works" because it is statistically different from a horizontal line of no correlation.
+
+
+### 2. On Minimizing Errors in Statistical Modeling
+
+#### 2.1 Grid Search in the Parameter Space
+
+I want to write a function now. The function takes the following as its inputs:
+
++ a dataset with one predictor and one outcome variable
++ a pair of parameters, $/beta_0$ and $/beta_1$, 
+
+and it returns the *sum of squared errors (i.e. residuals)* from the simple linear regression of the well known $Y = \beta_0 + \beta_1X +\epsilon$ form. 
+
+Here is what I want essentially:
+
+```{r echo = T}
+d <- data.frame(x = iris$Sepal.Length,
+                y = iris$Petal.Length)
+residuals <- summary(lm(y ~ x, data = d))$residuals
+print(sum(residuals^2))
+```
+
+But I do not want to use `lm()`: instead, I want to be able to specify $/beta_0$ and $/beta_1$ myself:
+
+```{r echo = T}
+sse <- function(d, beta_0, beta_1) {
+  predictions <- beta_0 + beta_1 * d$x
+  residuals <- d$y - predictions
+  return(sum(residuals^2))
+}
+```
+
+Ok. Now, the `lm()` function in R can find the optimal values of the parameters $/beta_0$ and $/beta_1$, right?
+
+```{r echo = T}
+slr_model <- lm(y ~ x, data = d)
+coefficients(slr_model)
+```
+
+Let's test our `sse()` function:
+
+```{r echo = T}
+beta_0_test <- coefficients(slr_model)[1]
+beta_1_test <- coefficients(slr_model)[2]
+sse(d = d, 
+    beta_0 = beta_0_test, 
+    beta_1 = beta_1_test)
+```
+
+And from `lm()` again:
+
+```{r echo = T}
+d <- data.frame(x = iris$Sepal.Length,
+                y = iris$Petal.Length)
+residuals <- summary(lm(y ~ x, data = d))$residuals
+print(sum(residuals^2))
+```
+
+So we know that our `sse()` works just fine.
+
+Now: how could have determined the optimal values - *the error minimizing values* - of $/beta_0$ and $/beta_1$ *without relying on* `lm()`?
+
+One idea is to move across the space of the parameter values in small steps and compute the model error at each point in that space, for example:
+
+```{r echo = T}
+test_beta_0 <- seq(-10, 10, by = .1)
+test_beta_1 <- seq(-10, 10, by = .1)
+model_errors <- lapply(test_beta_0, function(x) {
+  return(
+    rbindlist(
+      lapply(test_beta_1, function(y) {
+        s <- sse(d = d, beta_0 = x, beta_1 = y)
+        return(data.frame(sse = s, 
+                          beta_0 = x, 
+                          beta_1 = y))
+    }))
+  )
+})
+model_errors <- rbindlist(model_errors)
+head(model_errors)
+```
+
+What would be the most optimal estimates of of $/beta_0$ and $/beta_1$ then?
+
+```{r echo = T}
+model_errors[which.min(model_errors$sse), ]
+```
+
+Compare:
+
+```{r echo = T}
+coefficients(slr_model)
+```
+
+Hm, not bad?
+
+#### 2.2 Sample the Parameter Space
+
+Another idea that comes to mind is the following one: why not take a uniform random sample from the Parameter Space and check out the `sse()` at various points defined by their $/beta_0$ and $/beta_1$ coordinates?
+
+```{r echo = T}
+sample_parameters <- data.frame(beta_0 = runif(100000, -10, 10), 
+                                beta_1 = runif(100000, -10, 10))
+head(sample_parameters)
+```
+
+Now let's find the model errors at each randomly sampled combination of parameters:
+
+```{r echo = T}
+sample_parameters$sse <- apply(sample_parameters, 1, function(x) {
+    sse(d, x[1], x[2])
+})
+head(sample_parameters)
+```
+
+And what would be the most optimal estimates of of $/beta_0$ and $/beta_1$ in this case?
+
+```{r echo = T}
+sample_parameters[which.min(sample_parameters$sse), ]
+```
+
+Compare:
+
+```{r echo = T}
+coefficients(slr_model)
+```
+
+Hm?
+
+**N.B.** Finding the optimal values of the model's parameters implies *some* sort of search through the Paramater Space, and picking the values that minimize the model error as much as possible.
+
+But there are better ways to do it than Grid Search or Random Sampling. And whwnever that is possible, this is what we do to our statistical learning models: *we optimize them*.
+
+Please pay close attention to what exactly is happening in these procedures:
+
++ the dataset `d` is a constant, it does not change in any of the `sse()` function's run;
++ the parameters $/beta_0$ and $/beta_1$ vary in some way (until now: grid search or random uniform sampling), and 
++ the `sse()` function *does not estimate anything* - it is not `lm()`! - but computes the model error instead. 
+So what are we really looking for? **We are looking for a way to find the minimum of our `sse()` function.**
+
+#### 2.3 Optimize the Simple Linear Regression model w. base R optim()
+
+First we need a slight rewrite of `sse()` only:
+
+```{r echo = T}
+sse <- function(params) {
+  beta_0 <- params[1]
+  beta_1 <- params[2]
+  # - MODEL IS HERE:
+  predictions <- beta_0 + beta_1 * d$x
+  # - MODEL ENDS HERE ^^
+  residuals <- d$y - predictions
+  return(sum(residuals^2))
+}
+```
+
+**N.B.** As the dataset `d` is a constant, it does not play a role of an `sse()` function parameter anymore.
+
+Pick some random, initial values for $/beta_0$ and $/beta_1$:
+
+```{r echo = T}
+beta_0_start <- runif(1, -10, 10)
+beta_1_start <- runif(1, -10, 10)
+print(beta_0_start)
+print(beta_1_start)
+```
+
+```{r echo = T}
+solution <- optim(par = c(beta_0_start, beta_1_start), 
+                  fn = sse, 
+                  method = "Nelder-Mead",
+                  lower = -Inf, upper = Inf)
+```
+
+```{r echo = T}
+print(solution$par)
+```
+
+Compare:
+
+```{r echo = T}
+coefficients(slr_model)
+```
+
+Now that looks great!
+
+What are we really looking at here is this (first reducing the `sample_parameters` dataframe a bit... :-)
+
+```{r echo = T}
+# - back to the old version of sse():
+sse <- function(d, beta_0, beta_1) {
+  predictions <- beta_0 + beta_1 * d$x
+  residuals <- d$y - predictions
+  return(sum(residuals^2))
+}
+# - sample parameters on a different range for plotting purposes
+sample_parameters <- data.frame(beta_0 = runif(100000, -7.5, 7.5), 
+                                beta_1 = runif(100000, -2, 2))
+sample_parameters$sse <- apply(sample_parameters, 1, function(x) {
+    sse(d, x[1], x[2])
+})
+head(sample_parameters)
+```
+
+```{r echo = T}
+plot_ly() %>% 
+  add_trace(data = sample_parameters,  
+            x = sample_parameters$beta_0, 
+            y = sample_parameters$beta_1, 
+            z = sample_parameters$sse, 
+            type = "mesh3d", 
+            intensity = sample_parameters$sse, 
+            colorscale = "Viridis") %>% 
+  layout(
+    modebar = list(orientation = "v"), 
+    title = "The Simple Linear Regression Error Landscape",
+    scene = list(
+      xaxis = list(title = "Beta 0", range = c(-7.5, 7.5)),
+      yaxis = list(title = "Beta 1", range = c(-2, 2)),
+      zaxis = list(title = "SSE")
+    ))
+```
+
+
+```{r echo = T}
+sample_parameters[which.min(sample_parameters$sse), ]
+```
+Compare:
+
+```{r echo = T}
+coefficients(slr_model)
+```
+
+
+***
+
+### Further Readings
+
++ [Regression, by David M. Lane](http://onlinestatbook.com/2/regression/regression.html)
++ [{broom} package: Vignette](https://cran.r-project.org/web/packages/broom/vignettes/broom.html)
+
+
+### R Markdown
+
++ [R Markdown](https://rmarkdown.rstudio.com/) is what I have used to produce this beautiful Notebook. We will learn more about it near the end of the course, but if you already feel ready to dive deep, here's a book: [R Markdown: The Definitive Guide, Yihui Xie, J. J. Allaire, Garrett Grolemunds.](https://bookdown.org/yihui/rmarkdown/) 
+
+***
+Goran S. Milovanović
+
+DataKolektiv, 2020/21
+
+contact: goran.milovanovic@datakolektiv.com
+
+![](../_img/DK_Logo_100.png)
+
+***
+License: [GPLv3](http://www.gnu.org/licenses/gpl-3.0.txt)
+This Notebook is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+This Notebook is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with this Notebook. If not, see <http://www.gnu.org/licenses/>.
+
+***
+
